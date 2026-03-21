@@ -4,6 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>App Agrícola Nalhuitad</title>
+<meta name="description" content="Seguimiento de cultivos hidropónicos — Nalhuitad">
+<meta name="theme-color" content="#276F50">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Nalhuitad">
+<link rel="manifest" href="data:application/json,{&quot;name&quot;:&quot;App Agr%C3%ADcola Nalhuitad&quot;,&quot;short_name&quot;:&quot;Nalhuitad&quot;,&quot;start_url&quot;:&quot;.&quot;,&quot;display&quot;:&quot;standalone&quot;,&quot;background_color&quot;:&quot;%23F7F7F4&quot;,&quot;theme_color&quot;:&quot;%23276F50&quot;}">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%23276F50'/><path d='M50 20a22 22 0 0 1 22 22c0 12-22 38-22 38S28 54 28 42a22 22 0 0 1 22-22z' fill='white'/><circle cx='50' cy='41' r='7' fill='%23276F50'/></svg>">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -67,6 +74,26 @@ const fsDb = {
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body,#root{height:100%;width:100%;overflow:hidden}
 body{font-family:'DM Sans',sans-serif;background:#F7F7F4;color:#1A1A18}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+@keyframes slideUp{from{opacity:0;transform:translateY(32px)}to{opacity:1;transform:translateY(0)}}
+@keyframes slideDown{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes toastIn{from{opacity:0;transform:translateX(120%)}to{opacity:1;transform:translateX(0)}}
+@keyframes modalIn{from{opacity:0;transform:translateY(100%)}to{opacity:1;transform:translateY(0)}}
+@keyframes scaleIn{from{opacity:0;transform:scale(0.96)}to{opacity:1;transform:scale(1)}}
+@keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
+.fade-in{animation:fadeIn 0.22s ease forwards}
+.slide-up{animation:slideUp 0.28s cubic-bezier(0.34,1.2,0.64,1) forwards}
+.modal-in{animation:modalIn 0.32s cubic-bezier(0.34,1.1,0.64,1) forwards}
+.scale-in{animation:scaleIn 0.2s ease forwards}
+.lot-card{transition:transform 0.12s ease, box-shadow 0.12s ease}
+.lot-card:hover{transform:translateY(-1px);box-shadow:0 4px 16px rgba(0,0,0,0.06)}
+.lot-card:active{transform:scale(0.985)}
+.skeleton{background:linear-gradient(90deg,#F0F0EA 25%,#E8E8E2 50%,#F0F0EA 75%);background-size:200% 100%;animation:shimmer 1.4s ease infinite;border-radius:8px}
+input,textarea,select{-webkit-appearance:none;appearance:none}
+input[type=date]{color:#1A1A18}
+::-webkit-scrollbar{display:none}
 </style>
 </head>
 <body>
@@ -77,7 +104,7 @@ const { useState, useEffect, useCallback } = React;
 const STAGES = {
   almacigo:    { label: 'Almácigo',   color: '#A67C52', bg: '#F5EFE6', order: 0 },
   transplante: { label: 'Transplante', color: '#2171B5', bg: '#E3F0FB', order: 1 },
-  raleo:       { label: 'Raleo',       color: '#276F50', bg: '#E2F3EC', order: 2 },
+  raleo:       { label: 'Raleo',       color: '#A0286A', bg: '#F7E0EE', order: 2 },
   cosecha:     { label: 'Cosecha',     color: '#6B3FA0', bg: '#EEE8F7', order: 3 },
 };
 
@@ -86,9 +113,11 @@ const PLANTS_PER_TRAY = 135;
 const toPlants = (trays) => (trays ?? 0) * PLANTS_PER_TRAY;
 
 function daysSince(dateStr) {
-  const d = new Date(dateStr);
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
   const now = new Date();
-  return Math.floor((now - d) / 86400000);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.floor((today - date) / 86400000);
 }
 
 function formatDate(dateStr) {
@@ -154,8 +183,26 @@ function StageBadge({ stage, days }) {
   );
 }
 
+function SkeletonCard() {
+  return (
+    <div style={{background:'#fff', borderRadius:14, padding:'16px 18px', marginBottom:10, border:'0.5px solid #E0E0DA'}}>
+      <div style={{display:'flex', justifyContent:'space-between', marginBottom:12}}>
+        <div>
+          <div className="skeleton" style={{width:120, height:12, marginBottom:8}} />
+          <div className="skeleton" style={{width:160, height:16, marginBottom:6}} />
+          <div className="skeleton" style={{width:100, height:12}} />
+        </div>
+        <div className="skeleton" style={{width:80, height:28, borderRadius:20}} />
+      </div>
+      <div style={{display:'flex', gap:20, paddingTop:10, borderTop:'0.5px solid #F0F0EA'}}>
+        {[60,80,70].map((w,i) => <div key={i}><div className="skeleton" style={{width:w, height:10, marginBottom:6}} /><div className="skeleton" style={{width:w-10, height:14}} /></div>)}
+      </div>
+    </div>
+  );
+}
+
 // ── LOTES SCREEN ───────────────────────────────────────
-function LotesScreen({ lots, onSelect }) {
+function LotesScreen({ lots, onSelect, goToNuevo }) {
   const active = lots.filter(l => l.stage !== 'cosecha');
   const cosechados = lots.filter(l => l.stage === 'cosecha');
   const [editingCap, setEditingCap] = useState(false);
@@ -177,14 +224,19 @@ function LotesScreen({ lots, onSelect }) {
   if (lots.length === 0) {
     return (
       <div style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:32, textAlign:'center'}}>
-        <div style={{width:60, height:60, borderRadius:16, background:'#E8F2EB', display:'flex', alignItems:'center', justifyContent:'center', marginBottom:16}}>
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#276F50" strokeWidth="1.8" strokeLinecap="round">
+        <div style={{width:72, height:72, borderRadius:20, background:'#E8F2EB', display:'flex', alignItems:'center', justifyContent:'center', marginBottom:20}}>
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#276F50" strokeWidth="1.6" strokeLinecap="round">
             <path d="M12 2a9 9 0 0 1 9 9c0 4.97-9 13-9 13S3 15.97 3 11a9 9 0 0 1 9-9z"/>
             <circle cx="12" cy="11" r="2.5"/>
           </svg>
         </div>
-        <p style={{fontSize:15, fontWeight:500, color:'#1A1A18', marginBottom:6}}>Sin lotes registrados</p>
-        <p style={{fontSize:13, color:'#888884', lineHeight:1.6}}>Tocá "Nuevo" en el menú para<br/>registrar tu primer lote.</p>
+        <p style={{fontSize:17, fontWeight:600, color:'#1A1A18', marginBottom:8}}>Sin lotes registrados</p>
+        <p style={{fontSize:14, color:'#888884', lineHeight:1.6, marginBottom:24}}>Registrá tu primer lote para<br/>empezar el seguimiento.</p>
+        <button onClick={goToNuevo} style={{
+          padding:'12px 28px', borderRadius:12, border:'none',
+          background:'#276F50', color:'#fff',
+          fontSize:14, fontWeight:600, cursor:'pointer'
+        }}>+ Registrar primer lote</button>
       </div>
     );
   }
@@ -278,7 +330,7 @@ function LotesScreen({ lots, onSelect }) {
                 </p>
                 {key === 'almacigo' && (
                   <p style={{fontSize:11, color:'#888884', marginTop:2}}>
-                    {lots.filter(l=>l.stage==='almacigo').reduce((a,l)=>a+l.quantity,0)} almácigos × 128
+                    {lots.filter(l=>l.stage==='almacigo').reduce((a,l)=>a+l.quantity,0)} almácigos × {PLANTS_PER_TRAY}
                   </p>
                 )}
               </div>
@@ -317,50 +369,57 @@ function LotCard({ lot, onSelect, muted }) {
   const days = daysSince(currentStageDate);
   const alert = getLotAlert(lot);
 
-  const alertBorder = alert?.status === 'overdue' ? '#E05C3A'
-    : alert?.status === 'warning' ? '#E07B2A' : '#E0E0DA';
+  const isOverdue = alert?.status === 'overdue';
+  const isWarning = alert?.status === 'warning';
+  const accentColor = isOverdue ? '#E05C3A' : isWarning ? '#E07B2A' : null;
+  const accentBg    = isOverdue ? '#FEF6F4' : isWarning ? '#FEF8F2' : '#fff';
 
   return (
     <div
+      className="lot-card"
       onClick={() => onSelect(lot)}
       style={{
-        background:'#fff', border:`0.5px solid ${alertBorder}`,
-        borderRadius:14, padding:'16px 18px',
+        background: accentBg,
+        border: `0.5px solid ${accentColor ? accentColor+'55' : '#E0E0DA'}`,
+        borderRadius:14, overflow:'hidden',
         marginBottom:10, cursor:'pointer',
         opacity: muted ? 0.55 : 1,
-        transition:'transform 0.1s',
         WebkitUserSelect:'none',
+        display:'flex',
       }}
-      onTouchStart={e => e.currentTarget.style.transform='scale(0.985)'}
-      onTouchEnd={e => e.currentTarget.style.transform='scale(1)'}
     >
-      <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:10}}>
-        <div style={{flex:1, minWidth:0, marginRight:8}}>
-          <p style={{fontSize:12, fontWeight:600, color: STAGES[lot.stage].color, letterSpacing:'0.03em', textTransform:'uppercase', marginBottom:4}}>
-            {STAGE_LABELS[lot.stage]}
-          </p>
-          <p style={{fontSize:16, fontWeight:600, color:'#1A1A18', marginBottom:3}}>{lot.name}</p>
-          <p style={{fontSize:13, color:'#555550'}}>Sembrado {formatDate(lot.date)}</p>
+      {accentColor && (
+        <div style={{width:4, background: accentColor, flexShrink:0, borderRadius:'0'}} />
+      )}
+      <div style={{flex:1, padding:'16px 18px'}}>
+        <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:10}}>
+          <div style={{flex:1, minWidth:0, marginRight:8}}>
+            <p style={{fontSize:12, fontWeight:600, color: STAGES[lot.stage].color, letterSpacing:'0.03em', textTransform:'uppercase', marginBottom:4}}>
+              {STAGE_LABELS[lot.stage]}
+            </p>
+            <p style={{fontSize:16, fontWeight:600, color:'#1A1A18', marginBottom:3}}>{lot.name}</p>
+            <p style={{fontSize:13, color:'#555550'}}>Sembrado {formatDate(lot.date)}</p>
+          </div>
+          <div style={{display:'flex', flexDirection:'column', alignItems:'flex-end', gap:5, flexShrink:0}}>
+            <StageBadge stage={lot.stage} days={days} />
+            {alert && alert.status !== 'ok' && (
+              <span style={{
+                fontSize:11, fontWeight:700, padding:'4px 10px', borderRadius:20,
+                background: isOverdue ? '#FDDDD6' : '#FDE8CC',
+                color: isOverdue ? '#C0392B' : '#A85A00',
+              }}>
+                {isOverdue
+                  ? `${Math.abs(alert.remaining)} día${Math.abs(alert.remaining)!==1?'s':''} atrasado`
+                  : `Vence en ${alert.remaining} día${alert.remaining!==1?'s':''}`}
+              </span>
+            )}
+          </div>
         </div>
-        <div style={{display:'flex', flexDirection:'column', alignItems:'flex-end', gap:5, flexShrink:0}}>
-          <StageBadge stage={lot.stage} days={days} />
-          {alert && alert.status !== 'ok' && (
-            <span style={{
-              fontSize:11, fontWeight:600, padding:'4px 10px', borderRadius:20,
-              background: alert.status === 'overdue' ? '#FEF0EC' : '#FEF5EC',
-              color: alert.status === 'overdue' ? '#E05C3A' : '#E07B2A',
-            }}>
-              {alert.status === 'overdue'
-                ? `${Math.abs(alert.remaining)} día${Math.abs(alert.remaining)!==1?'s':''} atrasado`
-                : `Vence en ${alert.remaining} día${alert.remaining!==1?'s':''}`}
-            </span>
-          )}
+        <div style={{display:'flex', gap:20, marginTop:8, paddingTop:10, borderTop:`0.5px solid ${accentColor ? accentColor+'22' : '#F0F0EA'}`}}>
+          <Stat label="Almácigos" value={lot.quantity} />
+          <Stat label="Plantas al sembrar" value={toPlants(lot.quantity).toLocaleString()} />
+          <Stat label="En producción" value={(lot.currentQuantity ?? toPlants(lot.quantity)).toLocaleString()} />
         </div>
-      </div>
-      <div style={{display:'flex', gap:20, marginTop:8, paddingTop:10, borderTop:'0.5px solid #F0F0EA'}}>
-        <Stat label="Almácigos" value={lot.quantity} />
-        <Stat label="Plantas al sembrar" value={toPlants(lot.quantity).toLocaleString()} />
-        <Stat label="En producción" value={(lot.currentQuantity ?? toPlants(lot.quantity)).toLocaleString()} />
       </div>
     </div>
   );
@@ -378,7 +437,7 @@ function Stat({ label, value }) {
 // ── NUEVO SCREEN ───────────────────────────────────────
 function NuevoScreen({ onSave, goToLotes }) {
   const [form, setForm] = useState({
-    name: '', variety: 'Milena', date: todayISO(), quantity: '', notes: ''
+    name: '', variety: 'Milena', customVariety: '', date: todayISO(), quantity: '', notes: ''
   });
   const [saved, setSaved] = useState(false);
   const [errors, setErrors] = useState({});
@@ -390,6 +449,8 @@ function NuevoScreen({ onSave, goToLotes }) {
     if (!form.name.trim()) e.name = 'Ingresá un nombre para el lote';
     if (!form.quantity || isNaN(form.quantity) || parseInt(form.quantity) <= 0)
       e.quantity = 'Ingresá una cantidad válida';
+    if (form.variety === 'Otra' && !form.customVariety?.trim())
+      e.customVariety = 'Ingresá el nombre de la variedad';
     return e;
   };
 
@@ -400,7 +461,7 @@ function NuevoScreen({ onSave, goToLotes }) {
     const lot = {
       id: genId(),
       name: form.name.trim(),
-      variety: form.variety,
+      variety: form.variety === 'Otra' ? form.customVariety.trim() : form.variety,
       date: form.date,
       quantity: parseInt(form.quantity),
       currentQuantity: toPlants(parseInt(form.quantity)),
@@ -412,15 +473,15 @@ function NuevoScreen({ onSave, goToLotes }) {
     setSaved(true);
     setTimeout(() => {
       setSaved(false);
-      setForm({ name:'', variety:'Milena', date:todayISO(), quantity:'', notes:'' });
+      setForm({ name:'', variety:'Milena', customVariety:'', date:todayISO(), quantity:'', notes:'' });
       setErrors({});
       goToLotes();
     }, 1200);
   };
 
   return (
-    <div style={{flex:1, overflowY:'auto', padding:16}}>
-      <p style={{fontSize:13, fontWeight:600, letterSpacing:'0.06em', color:'#555550', textTransform:'uppercase', marginBottom:20}}>
+    <div style={{flex:1, overflowY:'auto', padding:'16px 18px'}}>
+      <p style={{fontSize:12, fontWeight:600, letterSpacing:'0.06em', color:'#555550', textTransform:'uppercase', marginBottom:20}}>
         Registrar lote nuevo
       </p>
 
@@ -447,30 +508,52 @@ function NuevoScreen({ onSave, goToLotes }) {
         <input
           type="number"
           inputMode="numeric"
-          placeholder="Ej: 300"
+          placeholder="Ej: 6"
           value={form.quantity}
           onChange={e => { set('quantity', e.target.value); setErrors(er => ({...er, quantity:undefined})) }}
           style={inputStyle(errors.quantity)}
         />
+        {form.quantity && !isNaN(form.quantity) && parseInt(form.quantity) > 0 && (
+          <div style={{
+            marginTop:8, padding:'10px 14px', borderRadius:10,
+            background:'#E2F3EC', display:'flex', alignItems:'center', gap:8
+          }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#276F50" strokeWidth="2.2" strokeLinecap="round"><path d="M12 2a9 9 0 0 1 9 9c0 4.97-9 13-9 13S3 15.97 3 11a9 9 0 0 1 9-9z"/><circle cx="12" cy="11" r="2"/></svg>
+            <span style={{fontSize:14, color:'#276F50', fontWeight:500}}>
+              {parseInt(form.quantity)} almácigos = <strong>{toPlants(parseInt(form.quantity)).toLocaleString()} plantas</strong>
+            </span>
+          </div>
+        )}
       </Field>
 
       <Field label="Variedad">
-        <div style={{display:'flex', gap:8}}>
+        <div style={{display:'flex', gap:8, marginBottom: form.variety === 'Otra' ? 8 : 0}}>
           {VARIETIES.map(v => (
             <button
               key={v}
-              onClick={() => set('variety', v)}
+              onClick={() => { set('variety', v); if (v !== 'Otra') set('customVariety', ''); }}
               style={{
-                flex:1, padding:'10px 0', borderRadius:10, border:'0.5px solid',
+                flex:1, padding:'12px 0', borderRadius:10, border:'0.5px solid',
                 borderColor: form.variety === v ? '#276F50' : '#E0E0DA',
                 background: form.variety === v ? '#E2F3EC' : '#fff',
-                color: form.variety === v ? '#276F50' : '#888884',
-                fontSize:13, fontWeight: form.variety === v ? 600 : 400,
+                color: form.variety === v ? '#276F50' : '#555550',
+                fontSize:14, fontWeight: form.variety === v ? 600 : 400,
                 cursor:'pointer', transition:'all 0.15s'
               }}
             >{v}</button>
           ))}
         </div>
+        {form.variety === 'Otra' && (
+          <input
+            type="text"
+            placeholder="Nombre de la variedad..."
+            value={form.customVariety || ''}
+            onChange={e => set('customVariety', e.target.value)}
+            style={inputStyle(errors.customVariety)}
+            autoFocus
+          />
+        )}
+        {errors.customVariety && <p style={{fontSize:13, color:'#C0392B', marginTop:5}}>{errors.customVariety}</p>}
       </Field>
 
       <Field label="Notas (opcional)">
@@ -479,14 +562,14 @@ function NuevoScreen({ onSave, goToLotes }) {
           value={form.notes}
           onChange={e => set('notes', e.target.value)}
           rows={3}
-          style={{...inputStyle(), resize:'none', lineHeight:1.6}}
+          style={{...inputStyle(), resize:'none', lineHeight:1.7}}
         />
       </Field>
 
       <button
         onClick={handleSave}
         style={{
-          width:'100%', padding:'14px 0', borderRadius:12, border:'none',
+          width:'100%', padding:'15px 0', borderRadius:12, border:'none',
           background: saved ? '#276F50' : '#1A1A18',
           color:'#fff', fontSize:15, fontWeight:600,
           cursor:'pointer', transition:'background 0.3s',
@@ -543,6 +626,8 @@ function AvanzarModal({ lot, onClose, onConfirm }) {
   const arrived = parseInt(qty) || 0;
   const merma = currentQty - arrived;
   const mermaPercent = currentQty > 0 ? Math.round((merma / currentQty) * 100) : 0;
+  const daysInNewStage = daysSince(date);
+  const isHistorical = daysInNewStage > 0;
 
   const handleConfirm = () => {
     if (!qty || isNaN(qty) || arrived <= 0) { setError('Ingresá una cantidad válida'); return; }
@@ -556,7 +641,7 @@ function AvanzarModal({ lot, onClose, onConfirm }) {
       display:'flex', alignItems:'flex-end', justifyContent:'center',
       zIndex:100
     }} onClick={e => { if(e.target===e.currentTarget) onClose(); }}>
-      <div style={{
+      <div className="modal-in" style={{
         background:'#F7F7F4', borderRadius:'20px 20px 0 0',
         width:'100%', maxWidth:480, padding:'20px 20px 36px',
         maxHeight:'90vh', overflowY:'auto'
@@ -570,8 +655,20 @@ function AvanzarModal({ lot, onClose, onConfirm }) {
           <span style={{fontWeight:500, color: nextInfo.color}}>{nextInfo.label}</span>
         </p>
 
-        <Field label="Fecha del movimiento">
+        <Field label="¿Cuándo ocurrió este movimiento?">
           <input type="date" value={date} onChange={e => setDate(e.target.value)} style={inputStyle()} />
+          <div style={{
+            marginTop:8, padding:'10px 14px', borderRadius:10,
+            background: isHistorical ? '#E8F3EC' : '#F5F5F0',
+            display:'flex', alignItems:'center', gap:8
+          }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={isHistorical ? '#276F50' : '#888884'} strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <span style={{fontSize:13, color: isHistorical ? '#276F50' : '#888884', fontWeight: isHistorical ? 500 : 400}}>
+              {daysInNewStage === 0
+                ? 'Movimiento de hoy — llevará 0 días en esta etapa'
+                : `Llevará ${daysInNewStage} día${daysInNewStage !== 1 ? 's' : ''} en ${nextInfo.label} al ingresar`}
+            </span>
+          </div>
         </Field>
 
         <Field label={`Plantas que llegan a ${nextInfo.label}`} error={error}>
@@ -627,8 +724,8 @@ function AvanzarModal({ lot, onClose, onConfirm }) {
 function MermaItem({ label, value, color }) {
   return (
     <div style={{flex:1, textAlign:'center'}}>
-      <p style={{fontSize:10, color:'#AAAA9F', marginBottom:3}}>{label}</p>
-      <p style={{fontSize:13, fontWeight:600, color, fontFamily:'DM Mono, monospace'}}>{value}</p>
+      <p style={{fontSize:12, color:'#888884', marginBottom:4}}>{label}</p>
+      <p style={{fontSize:14, fontWeight:600, color, fontFamily:'DM Mono, monospace'}}>{value}</p>
     </div>
   );
 }
@@ -653,7 +750,9 @@ function DetalleLote({ lot, onBack, backLabel = 'Volver', onUpdate, onDelete }) 
     setShowAvanzar(false);
   };
   const [form, setForm] = useState({
-    name: lot.name, variety: lot.variety,
+    name: lot.name,
+    variety: VARIETIES.includes(lot.variety) ? lot.variety : 'Otra',
+    customVariety: VARIETIES.includes(lot.variety) ? '' : lot.variety,
     date: lot.date, quantity: String(lot.quantity), notes: lot.notes || ''
   });
   const [errors, setErrors] = useState({});
@@ -675,7 +774,7 @@ function DetalleLote({ lot, onBack, backLabel = 'Volver', onUpdate, onDelete }) 
     const updated = {
       ...lot,
       name: form.name.trim(),
-      variety: form.variety,
+      variety: form.variety === 'Otra' ? (form.customVariety?.trim() || 'Otra') : form.variety,
       date: form.date,
       quantity: parseInt(form.quantity),
       notes: form.notes.trim(),
@@ -687,12 +786,12 @@ function DetalleLote({ lot, onBack, backLabel = 'Volver', onUpdate, onDelete }) 
 
   if (editing) {
     return (
-      <div style={{flex:1, overflowY:'auto', padding:16}}>
-        <button onClick={() => setEditing(false)} style={{display:'flex', alignItems:'center', gap:6, background:'none', border:'none', color:'#276F50', fontSize:13, fontWeight:500, cursor:'pointer', marginBottom:16, padding:0}}>
+      <div style={{flex:1, overflowY:'auto', padding:'16px 18px'}}>
+        <button onClick={() => setEditing(false)} style={{display:'flex', alignItems:'center', gap:6, background:'none', border:'none', color:'#276F50', fontSize:14, fontWeight:500, cursor:'pointer', marginBottom:20, padding:0}}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M19 12H5M12 5l-7 7 7 7"/></svg>
           Cancelar
         </button>
-        <p style={{fontSize:15, fontWeight:600, color:'#1A1A18', marginBottom:16}}>Editar lote</p>
+        <p style={{fontSize:12, fontWeight:600, letterSpacing:'0.06em', color:'#555550', textTransform:'uppercase', marginBottom:20}}>Editar lote</p>
 
         <Field label="Nombre del lote" error={errors.name}>
           <input type="text" value={form.name}
@@ -710,25 +809,31 @@ function DetalleLote({ lot, onBack, backLabel = 'Volver', onUpdate, onDelete }) 
             style={inputStyle(errors.quantity)} />
         </Field>
         <Field label="Variedad">
-          <div style={{display:'flex', gap:8}}>
+          <div style={{display:'flex', gap:8, marginBottom: form.variety === 'Otra' ? 8 : 0}}>
             {VARIETIES.map(v => (
-              <button key={v} onClick={() => set('variety', v)} style={{
-                flex:1, padding:'10px 0', borderRadius:10, border:'0.5px solid',
+              <button key={v} onClick={() => { set('variety', v); if (v !== 'Otra') set('customVariety', ''); }} style={{
+                flex:1, padding:'12px 0', borderRadius:10, border:'0.5px solid',
                 borderColor: form.variety === v ? '#276F50' : '#E0E0DA',
                 background: form.variety === v ? '#E2F3EC' : '#fff',
-                color: form.variety === v ? '#276F50' : '#888884',
-                fontSize:13, fontWeight: form.variety === v ? 600 : 400, cursor:'pointer'
+                color: form.variety === v ? '#276F50' : '#555550',
+                fontSize:14, fontWeight: form.variety === v ? 600 : 400, cursor:'pointer'
               }}>{v}</button>
             ))}
           </div>
+          {form.variety === 'Otra' && (
+            <input type="text" placeholder="Nombre de la variedad..."
+              value={form.customVariety || ''}
+              onChange={e => set('customVariety', e.target.value)}
+              style={inputStyle()} autoFocus />
+          )}
         </Field>
         <Field label="Notas (opcional)">
           <textarea value={form.notes} onChange={e => set('notes', e.target.value)}
-            rows={3} style={{...inputStyle(), resize:'none', lineHeight:1.6}} />
+            rows={3} style={{...inputStyle(), resize:'none', lineHeight:1.7}} />
         </Field>
 
         <button onClick={handleUpdate} style={{
-          width:'100%', padding:'14px 0', borderRadius:12, border:'none',
+          width:'100%', padding:'15px 0', borderRadius:12, border:'none',
           background: saved ? '#276F50' : '#1A1A18',
           color:'#fff', fontSize:15, fontWeight:600, cursor:'pointer',
           transition:'background 0.3s', marginTop:8, marginBottom:24
@@ -775,30 +880,30 @@ function DetalleLote({ lot, onBack, backLabel = 'Volver', onUpdate, onDelete }) 
         {lot.notes && <Row label="Notas" value={lot.notes} />}
       </div>
 
-      <p style={{fontSize:11, fontWeight:600, letterSpacing:'0.08em', color:'#888884', textTransform:'uppercase', margin:'20px 0 10px'}}>Historial de etapas</p>
+      <p style={{fontSize:12, fontWeight:600, letterSpacing:'0.06em', color:'#555550', textTransform:'uppercase', margin:'20px 0 10px'}}>Historial de etapas</p>
       <div style={{background:'#fff', border:'0.5px solid #E0E0DA', borderRadius:14, overflow:'hidden', marginBottom:24}}>
         {lot.stageHistory.map((h, i) => (
           <div key={i} style={{
             display:'flex', justifyContent:'space-between', alignItems:'center',
-            padding:'12px 16px',
+            padding:'14px 16px',
             borderBottom: i < lot.stageHistory.length-1 ? '0.5px solid #F0F0EA' : 'none'
           }}>
             <div style={{display:'flex', alignItems:'center', gap:10}}>
-              <div style={{width:8, height:8, borderRadius:4, background: STAGES[h.stage].color}} />
+              <div style={{width:9, height:9, borderRadius:5, background: STAGES[h.stage].color, flexShrink:0}} />
               <div>
-                <span style={{fontSize:13, fontWeight:500, display:'block'}}>{STAGES[h.stage].label}</span>
-                {h.notes && <span style={{fontSize:11, color:'#888884'}}>{h.notes}</span>}
+                <span style={{fontSize:14, fontWeight:500, display:'block', color:'#1A1A18'}}>{STAGES[h.stage].label}</span>
+                {h.notes && <span style={{fontSize:12, color:'#888884', marginTop:2, display:'block'}}>{h.notes}</span>}
               </div>
             </div>
             <div style={{textAlign:'right'}}>
-              <p style={{fontSize:12, color:'#1A1A18', fontFamily:'DM Mono, monospace'}}>{formatDate(h.date)}</p>
-              <p style={{fontSize:11, color:'#888884'}}>{h.quantity} plantas</p>
+              <p style={{fontSize:13, color:'#1A1A18', fontFamily:'DM Mono, monospace'}}>{formatDate(h.date)}</p>
+              <p style={{fontSize:12, color:'#888884', marginTop:2}}>{h.quantity.toLocaleString()} plantas</p>
               {i > 0 && (() => {
                 const prev = lot.stageHistory[i-1].quantity;
                 const diff = prev - h.quantity;
                 const pct = Math.round((diff / prev) * 100);
                 return diff > 0
-                  ? <p style={{fontSize:10, color: pct > 20 ? '#C0392B' : '#E07B2A'}}>↓ {diff} ({pct}%)</p>
+                  ? <p style={{fontSize:11, color: pct > 20 ? '#C0392B' : '#E07B2A', marginTop:2}}>↓ {diff.toLocaleString()} ({pct}%)</p>
                   : null;
               })()}
             </div>
@@ -821,8 +926,8 @@ function DetalleLote({ lot, onBack, backLabel = 'Volver', onUpdate, onDelete }) 
 
       {!confirmDelete ? (
         <button onClick={() => setConfirmDelete(true)} style={{
-          width:'100%', padding:'12px 0', borderRadius:12, border:'0.5px solid #E0D8D8',
-          background:'none', color:'#B05050', fontSize:13, fontWeight:500,
+          width:'100%', padding:'13px 0', borderRadius:12, border:'0.5px solid #E0D8D8',
+          background:'none', color:'#B05050', fontSize:14, fontWeight:500,
           cursor:'pointer', marginBottom:24
         }}>
           Eliminar lote
@@ -830,20 +935,20 @@ function DetalleLote({ lot, onBack, backLabel = 'Volver', onUpdate, onDelete }) 
       ) : (
         <div style={{
           background:'#FEF0EC', border:'0.5px solid #F5C4B3',
-          borderRadius:12, padding:'14px 16px', marginBottom:24
+          borderRadius:12, padding:'16px 18px', marginBottom:24
         }}>
-          <p style={{fontSize:13, fontWeight:600, color:'#1A1A18', marginBottom:4}}>¿Eliminar este lote?</p>
-          <p style={{fontSize:12, color:'#888884', marginBottom:12}}>Esta acción no se puede deshacer.</p>
+          <p style={{fontSize:15, fontWeight:600, color:'#1A1A18', marginBottom:6}}>¿Eliminar este lote?</p>
+          <p style={{fontSize:13, color:'#888884', marginBottom:16}}>Esta acción no se puede deshacer.</p>
           <div style={{display:'flex', gap:8}}>
             <button onClick={() => setConfirmDelete(false)} style={{
-              flex:1, padding:'10px 0', borderRadius:10,
+              flex:1, padding:'12px 0', borderRadius:10,
               border:'0.5px solid #E0E0DA', background:'#fff',
-              color:'#555550', fontSize:13, fontWeight:500, cursor:'pointer'
+              color:'#555550', fontSize:14, fontWeight:500, cursor:'pointer'
             }}>Cancelar</button>
             <button onClick={() => onDelete(lot.id)} style={{
-              flex:1, padding:'10px 0', borderRadius:10,
+              flex:1, padding:'12px 0', borderRadius:10,
               border:'none', background:'#C0392B',
-              color:'#fff', fontSize:13, fontWeight:600, cursor:'pointer'
+              color:'#fff', fontSize:14, fontWeight:600, cursor:'pointer'
             }}>Sí, eliminar</button>
           </div>
         </div>
@@ -855,9 +960,9 @@ function DetalleLote({ lot, onBack, backLabel = 'Volver', onUpdate, onDelete }) 
 
 function Row({ label, value }) {
   return (
-    <div style={{display:'flex', justifyContent:'space-between', alignItems:'baseline', padding:'6px 0', borderBottom:'0.5px solid #F5F5F0'}}>
-      <span style={{fontSize:12, color:'#888884'}}>{label}</span>
-      <span style={{fontSize:13, fontWeight:500, color:'#1A1A18', fontFamily:'DM Mono, monospace', textAlign:'right', maxWidth:'60%'}}>{value}</span>
+    <div style={{display:'flex', justifyContent:'space-between', alignItems:'baseline', padding:'8px 0', borderBottom:'0.5px solid #F5F5F0'}}>
+      <span style={{fontSize:13, color:'#888884'}}>{label}</span>
+      <span style={{fontSize:14, fontWeight:500, color:'#1A1A18', fontFamily:'DM Mono, monospace', textAlign:'right', maxWidth:'60%'}}>{value}</span>
     </div>
   );
 }
@@ -934,54 +1039,61 @@ function AlertCard({ lot, alert, onSelect }) {
   const isOverdue = alert.status === 'overdue';
   const isWarning = alert.status === 'warning';
   const accentColor = isOverdue ? '#E05C3A' : isWarning ? '#E07B2A' : '#276F50';
-  const accentBg   = isOverdue ? '#FEF0EC' : isWarning ? '#FEF5EC' : '#E8F3EC';
-  const borderColor = isOverdue||isWarning ? accentColor+'55' : '#E0E0DA';
+  const accentBg    = isOverdue ? '#FEF6F4' : isWarning ? '#FEF8F2' : '#fff';
   const progressPct = Math.min(100, Math.round((alert.days / alert.maxDays) * 100));
 
   return (
     <div onClick={() => onSelect(lot)} style={{
-      background:'#fff', border:`0.5px solid ${borderColor}`,
-      borderRadius:14, padding:'16px 18px', marginBottom:10, cursor:'pointer',
+      background: accentBg,
+      border: `0.5px solid ${isOverdue||isWarning ? accentColor+'55' : '#E0E0DA'}`,
+      borderRadius:14, overflow:'hidden', marginBottom:10, cursor:'pointer',
       WebkitUserSelect:'none', transition:'transform 0.1s',
+      display:'flex',
     }}
       onTouchStart={e => e.currentTarget.style.transform='scale(0.985)'}
       onTouchEnd={e => e.currentTarget.style.transform='scale(1)'}
     >
-      <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:10}}>
-        <div style={{flex:1, minWidth:0, marginRight:8}}>
-          <p style={{fontSize:12, fontWeight:600, color: STAGES[lot.stage].color, letterSpacing:'0.03em', textTransform:'uppercase', marginBottom:4}}>
-            {STAGE_LABELS[lot.stage]}
-          </p>
-          <p style={{fontSize:16, fontWeight:600, color:'#1A1A18', marginBottom:3}}>{lot.name}</p>
-          <p style={{fontSize:13, color:'#555550'}}>{SEASON_LABEL[alert.season]} · {alert.maxDays} días estimados</p>
-        </div>
-        <div style={{
-          background: accentBg, color: accentColor,
-          fontSize:13, fontWeight:700,
-          padding:'6px 12px', borderRadius:20, flexShrink:0, textAlign:'center'
-        }}>
-          {isOverdue
-            ? `${Math.abs(alert.remaining)}d atrasado`
-            : isWarning
-            ? `Vence en ${alert.remaining}d`
-            : `${alert.remaining}d restantes`}
-        </div>
-      </div>
-
-      <div style={{marginBottom:8}}>
-        <div style={{height:5, background:'#F0F0EA', borderRadius:3, overflow:'hidden'}}>
+      {(isOverdue || isWarning) && (
+        <div style={{width:4, background: accentColor, flexShrink:0}} />
+      )}
+      <div style={{flex:1, padding:'16px 18px'}}>
+        <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:10}}>
+          <div style={{flex:1, minWidth:0, marginRight:8}}>
+            <p style={{fontSize:12, fontWeight:600, color: STAGES[lot.stage].color, letterSpacing:'0.03em', textTransform:'uppercase', marginBottom:4}}>
+              {STAGE_LABELS[lot.stage]}
+            </p>
+            <p style={{fontSize:16, fontWeight:600, color:'#1A1A18', marginBottom:3}}>{lot.name}</p>
+            <p style={{fontSize:13, color:'#555550'}}>{SEASON_LABEL[alert.season]} · {alert.maxDays} días estimados</p>
+          </div>
           <div style={{
-            height:'100%', borderRadius:3,
-            width:`${progressPct}%`,
-            background: isOverdue ? '#E05C3A' : isWarning ? '#E07B2A' : '#276F50',
-            transition:'width 0.3s'
-          }} />
+            background: isOverdue ? '#FDDDD6' : isWarning ? '#FDE8CC' : '#E2F3EC',
+            color: isOverdue ? '#C0392B' : isWarning ? '#A85A00' : '#276F50',
+            fontSize:13, fontWeight:700,
+            padding:'6px 12px', borderRadius:20, flexShrink:0, textAlign:'center'
+          }}>
+            {isOverdue
+              ? `${Math.abs(alert.remaining)}d atrasado`
+              : isWarning
+              ? `Vence en ${alert.remaining}d`
+              : `${alert.remaining}d restantes`}
+          </div>
         </div>
-      </div>
 
-      <div style={{display:'flex', justifyContent:'space-between', paddingTop:8, borderTop:'0.5px solid #F0F0EA'}}>
-        <span style={{fontSize:13, color:'#555550', fontFamily:'DM Mono, monospace'}}>Día {alert.days} de {alert.maxDays}</span>
-        <span style={{fontSize:13, color:'#555550', fontFamily:'DM Mono, monospace'}}>{(lot.currentQuantity ?? toPlants(lot.quantity)).toLocaleString()} plantas</span>
+        <div style={{marginBottom:8}}>
+          <div style={{height:5, background: isOverdue||isWarning ? accentColor+'22' : '#F0F0EA', borderRadius:3, overflow:'hidden'}}>
+            <div style={{
+              height:'100%', borderRadius:3,
+              width:`${progressPct}%`,
+              background: accentColor,
+              transition:'width 0.3s'
+            }} />
+          </div>
+        </div>
+
+        <div style={{display:'flex', justifyContent:'space-between', paddingTop:8, borderTop:`0.5px solid ${isOverdue||isWarning ? accentColor+'22' : '#F0F0EA'}`}}>
+          <span style={{fontSize:13, color:'#555550', fontFamily:'DM Mono, monospace'}}>Día {alert.days} de {alert.maxDays}</span>
+          <span style={{fontSize:13, color:'#555550', fontFamily:'DM Mono, monospace'}}>{(lot.currentQuantity ?? toPlants(lot.quantity)).toLocaleString()} plantas</span>
+        </div>
       </div>
     </div>
   );
@@ -1012,32 +1124,35 @@ const NAV = [
 function NavBar({ active, onChange, alertCount }) {
   return (
     <div style={{
-      display:'flex', background:'#fff',
-      borderTop:'0.5px solid #E8E8E2',
-      paddingBottom:'env(safe-area-inset-bottom, 0px)',
+      display:'flex', background:'#1C2B20',
+      paddingBottom:'max(10px, env(safe-area-inset-bottom))',
     }}>
       {NAV.map(({ id, label, icon: Icon }) => (
         <button
           key={id}
+          data-nav={id}
           onClick={() => onChange(id)}
           style={{
             flex:1, display:'flex', flexDirection:'column', alignItems:'center',
-            justifyContent:'center', padding:'10px 0 8px',
+            justifyContent:'center', padding:'12px 0 10px',
             background:'none', border:'none', cursor:'pointer',
-            color: active === id ? '#276F50' : '#B0B0A8',
-            transition:'color 0.15s', position:'relative'
+            color: active === id ? '#6EC99A' : '#6B8C73',
+            transition:'color 0.15s, transform 0.1s', position:'relative',
+            WebkitUserSelect:'none',
           }}
+          onTouchStart={e => e.currentTarget.style.transform='scale(0.9)'}
+          onTouchEnd={e => e.currentTarget.style.transform='scale(1)'}
         >
           <Icon active={active === id} />
           {id === 'alertas' && alertCount > 0 && (
             <div style={{
-              position:'absolute', top:8, left:'50%', transform:'translateX(4px)',
-              width:16, height:16, borderRadius:8, background:'#E05C3A',
+              position:'absolute', top:10, left:'50%', transform:'translateX(6px)',
+              width:18, height:18, borderRadius:9, background:'#E05C3A',
               display:'flex', alignItems:'center', justifyContent:'center',
-              fontSize:9, fontWeight:700, color:'#fff'
+              fontSize:10, fontWeight:700, color:'#fff'
             }}>{alertCount}</div>
           )}
-          <span style={{fontSize:10, fontWeight: active === id ? 600 : 400, marginTop:3}}>{label}</span>
+          <span style={{fontSize:11, fontWeight: active === id ? 600 : 400, marginTop:4}}>{label}</span>
         </button>
       ))}
     </div>
@@ -1045,16 +1160,33 @@ function NavBar({ active, onChange, alertCount }) {
 }
 
 function LotesIcon({ active }) {
-  return <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active?2.2:1.8} strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>;
+  return <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active?2.2:1.8} strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>;
 }
 function NuevoIcon({ active }) {
-  return <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active?2.2:1.8} strokeLinecap="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>;
+  return <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active?2.2:1.8} strokeLinecap="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>;
 }
 function AlertasIcon({ active }) {
-  return <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active?2.2:1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>;
+  return <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active?2.2:1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>;
 }
 function HistorialIcon({ active }) {
-  return <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active?2.2:1.8} strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>;
+  return <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active?2.2:1.8} strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>;
+}
+
+// ── TOAST ──────────────────────────────────────────────
+function Toast({ msg, type, onDone }) {
+  useEffect(() => { const t = setTimeout(onDone, 2800); return () => clearTimeout(t); }, [onDone]);
+  const bg = type === 'error' ? '#C0392B' : type === 'warn' ? '#E07B2A' : '#276F50';
+  return (
+    <div style={{
+      position:'fixed', bottom:90, right:16, zIndex:200,
+      background: bg, color:'#fff',
+      padding:'10px 16px', borderRadius:12,
+      fontSize:13, fontWeight:500,
+      boxShadow:'0 4px 16px rgba(0,0,0,0.18)',
+      animation:'toastIn 0.3s ease forwards',
+      maxWidth:260, lineHeight:1.4,
+    }}>{msg}</div>
+  );
 }
 
 // ── APP ────────────────────────────────────────────────
@@ -1063,39 +1195,73 @@ function App() {
   const [prevScreen, setPrevScreen] = useState(null);
   const [lots, setLots] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState(null);
+  const [toast, setToast] = useState(null);
   const [selectedLot, setSelectedLot] = useState(null);
 
-  const fetchLots = useCallback(async () => {
+  const showToast = useCallback((msg, type = 'ok') => {
+    setToast({ msg, type, key: Date.now() });
+  }, []);
+
+  const fetchLots = useCallback(async (silent = false) => {
+    if (!silent) setSyncing(true);
     try {
       const data = await fsDb.list('lotes');
-      data.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+      data.sort((a, b) => {
+        const stageA = STAGE_ORDER.indexOf(a.stage);
+        const stageB = STAGE_ORDER.indexOf(b.stage);
+        if (stageA !== stageB) return stageA - stageB;
+        return (a.date || '').localeCompare(b.date || '');
+      });
       setLots(data);
-    } catch(e) { console.error(e); }
-    finally { setLoading(false); }
+      setError(false);
+      setLastSync(new Date());
+    } catch(e) {
+      if (!silent) setError(true);
+    } finally {
+      setLoading(false);
+      setSyncing(false);
+    }
   }, []);
 
   useEffect(() => {
     fetchLots();
-    const interval = setInterval(fetchLots, 15000);
+    const interval = setInterval(() => fetchLots(true), 15000);
     return () => clearInterval(interval);
   }, [fetchLots]);
 
   const saveLot = useCallback(async (lot) => {
-    const { id, ...data } = lot;
-    setLots(ls => [lot, ...ls.filter(l => l.id !== id)]);
-    await fsDb.set('lotes', id, lot);
-  }, []);
+    setLots(ls => [lot, ...ls.filter(l => l.id !== lot.id)]);
+    try {
+      await fsDb.set('lotes', lot.id, lot);
+      showToast('Lote guardado ✓');
+    } catch {
+      showToast('Error al guardar. Revisá la conexión.', 'error');
+    }
+  }, [showToast]);
 
   const updateLot = useCallback(async (updated) => {
     setLots(ls => ls.map(l => l.id === updated.id ? updated : l));
-    await fsDb.set('lotes', updated.id, updated);
-  }, []);
+    try {
+      await fsDb.set('lotes', updated.id, updated);
+      showToast('Cambios guardados ✓');
+    } catch {
+      showToast('Error al guardar. Revisá la conexión.', 'error');
+    }
+  }, [showToast]);
 
   const deleteLot = useCallback(async (id) => {
     setLots(ls => ls.filter(l => l.id !== id));
     setSelectedLot(null);
-    await fsDb.del('lotes', id);
-  }, []);
+    try {
+      await fsDb.del('lotes', id);
+      showToast('Lote eliminado');
+    } catch {
+      showToast('Error al eliminar. Revisá la conexión.', 'error');
+    }
+  }, [showToast]);
 
   const handleNav = (id) => {
     setSelectedLot(null);
@@ -1112,22 +1278,23 @@ function App() {
     if (screen === 'lotes') {
       if (selectedLot) {
         const lot = lots.find(l => l.id === selectedLot);
+        if (!lot) { setSelectedLot(null); return null; }
         const backLabel = prevScreen === 'alertas' ? 'Volver a Alertas' : 'Volver';
         const handleBack = () => {
           setSelectedLot(null);
           if (prevScreen) { setScreen(prevScreen); setPrevScreen(null); }
         };
-        return lot ? <DetalleLote lot={lot} onBack={handleBack} backLabel={backLabel} onUpdate={updateLot} onDelete={deleteLot} /> : null;
+        return <DetalleLote key={lot.id} lot={lot} onBack={handleBack} backLabel={backLabel} onUpdate={updateLot} onDelete={deleteLot} />;
       }
-      return <LotesScreen lots={lots} onSelect={lot => setSelectedLot(lot.id)} />;
+      return <LotesScreen key="lotes" lots={lots} onSelect={lot => setSelectedLot(lot.id)} goToNuevo={() => handleNav('nuevo')} />;
     }
-    if (screen === 'nuevo') return <NuevoScreen onSave={saveLot} goToLotes={() => setScreen('lotes')} />;
-    if (screen === 'alertas') return <AlertasScreen lots={lots} onSelect={lot => {
+    if (screen === 'nuevo') return <NuevoScreen key="nuevo" onSave={saveLot} goToLotes={() => setScreen('lotes')} />;
+    if (screen === 'alertas') return <AlertasScreen key="alertas" lots={lots} onSelect={lot => {
       setPrevScreen('alertas');
       setSelectedLot(lot.id);
       setScreen('lotes');
     }} />;
-    if (screen === 'historial') return <HistorialPlaceholder />;
+    if (screen === 'historial') return <HistorialPlaceholder key="historial" />;
   };
 
   const screenTitle = {
@@ -1139,44 +1306,88 @@ function App() {
 
   if (loading) {
     return (
-      <div style={{height:'100%', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', background:'#F7F7F4', gap:16}}>
-        <div style={{width:56, height:56, borderRadius:16, background:'#E2F3EC', display:'flex', alignItems:'center', justifyContent:'center'}}>
-          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#276F50" strokeWidth="2" strokeLinecap="round"><path d="M12 2a9 9 0 0 1 9 9c0 4.97-9 13-9 13S3 15.97 3 11a9 9 0 0 1 9-9z"/><circle cx="12" cy="11" r="2.5"/></svg>
+      <div style={{height:'100%', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', background:'#F7F7F4', gap:20}}>
+        <div style={{width:80, height:80, borderRadius:24, background:'#276F50', display:'flex', alignItems:'center', justifyContent:'center', marginBottom:4}}>
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.6" strokeLinecap="round">
+            <path d="M12 2a9 9 0 0 1 9 9c0 4.97-9 13-9 13S3 15.97 3 11a9 9 0 0 1 9-9z"/>
+            <circle cx="12" cy="11" r="2.5" fill="white" strokeWidth="0"/>
+          </svg>
         </div>
-        <p style={{fontSize:16, fontWeight:600, color:'#1A1A18'}}>App Agrícola Nalhuitad</p>
-        <p style={{fontSize:13, color:'#888884'}}>Conectando con la nube...</p>
+        <div style={{textAlign:'center'}}>
+          <p style={{fontSize:20, fontWeight:600, color:'#1A1A18', marginBottom:4}}>Nalhuitad</p>
+          <p style={{fontSize:13, color:'#888884'}}>App Agrícola</p>
+        </div>
+        <div style={{width:28, height:28, border:'2.5px solid #E2F3EC', borderTopColor:'#276F50', borderRadius:'50%', animation:'spin 0.8s linear infinite', marginTop:12}} />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div style={{height:'100%', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', background:'#F7F7F4', gap:16, padding:32, textAlign:'center'}}>
+        <div style={{width:72, height:72, borderRadius:20, background:'#FEF0EC', display:'flex', alignItems:'center', justifyContent:'center'}}>
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#E05C3A" strokeWidth="1.8" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        </div>
+        <div>
+          <p style={{fontSize:17, fontWeight:600, color:'#1A1A18', marginBottom:6}}>Sin conexión</p>
+          <p style={{fontSize:14, color:'#888884', lineHeight:1.7}}>No se pudo conectar con la nube.<br/>Revisá tu conexión a internet e intentá de nuevo.</p>
+        </div>
+        <button onClick={() => { setError(false); setLoading(true); fetchLots(); }} style={{
+          marginTop:8, padding:'13px 32px', borderRadius:12, border:'none',
+          background:'#1A1A18', color:'#fff', fontSize:14, fontWeight:600, cursor:'pointer'
+        }}>Reintentar</button>
       </div>
     );
   }
 
   return (
-    <div style={{
-      height:'100%', display:'flex', flexDirection:'column',
-      background:'#F7F7F4', maxWidth:480, margin:'0 auto',
-      position:'relative'
-    }}>
+    <div style={{height:'100%', display:'flex', flexDirection:'column', background:'#F7F7F4', maxWidth:480, margin:'0 auto', position:'relative'}}>
+
+      {toast && <Toast key={toast.key} msg={toast.msg} type={toast.type} onDone={() => setToast(null)} />}
+
       {!selectedLot && (
         <div style={{
-          padding:'48px 20px 16px',
-          background:'#F7F7F4',
-          borderBottom:'0.5px solid #EAEAE4',
+          padding:'max(48px, calc(env(safe-area-inset-top) + 16px)) 20px 16px',
+          background:'#F7F7F4', borderBottom:'0.5px solid #EAEAE4'
         }}>
-          <p style={{
-            fontSize: screen === 'lotes' ? 26 : 22,
-            fontWeight:600, color:'#1A1A18', lineHeight:1.2
-          }}>
-            {screenTitle[screen]}
-          </p>
-          {screen === 'lotes' && lots.filter(l => l.stage !== 'cosecha').length > 0 && (
-            <p style={{fontSize:13, color:'#555550', marginTop:4}}>
-              {lots.filter(l => l.stage !== 'cosecha').length} lote{lots.filter(l=>l.stage!=='cosecha').length!==1?'s':''} activo{lots.filter(l=>l.stage!=='cosecha').length!==1?'s':''}
-            </p>
-          )}
+          <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start'}}>
+            <div>
+              <p style={{fontSize: screen === 'lotes' ? 26 : 22, fontWeight:600, color:'#1A1A18', lineHeight:1.2}}>
+                {screenTitle[screen]}
+              </p>
+              {screen === 'lotes' && lots.filter(l => l.stage !== 'cosecha').length > 0 && (
+                <p style={{fontSize:13, color:'#555550', marginTop:4}}>
+                  {lots.filter(l => l.stage !== 'cosecha').length} lote{lots.filter(l=>l.stage!=='cosecha').length!==1?'s':''} activo{lots.filter(l=>l.stage!=='cosecha').length!==1?'s':''}
+                </p>
+              )}
+            </div>
+            <div style={{display:'flex', flexDirection:'column', alignItems:'flex-end', gap:3, marginTop:4}}>
+              {lastSync && (
+                <span style={{fontSize:13, fontWeight:600, color:'#1A1A18', fontFamily:'DM Mono, monospace'}}>
+                  {lastSync.toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit'})}
+                </span>
+              )}
+              {lastSync && (
+                <span style={{fontSize:11, color:'#888884'}}>
+                  {lastSync.toLocaleDateString('es-AR', {day:'2-digit', month:'short', year:'numeric'})}
+                </span>
+              )}
+              <div style={{display:'flex', alignItems:'center', gap:4, marginTop:2}}>
+                {syncing
+                  ? <div style={{width:7, height:7, border:'1.5px solid #D0D0CA', borderTopColor:'#276F50', borderRadius:'50%', animation:'spin 0.8s linear infinite'}} />
+                  : <div style={{width:7, height:7, borderRadius:'50%', background:'#276F50'}} />
+                }
+                <span style={{fontSize:10, color:'#AAAAAA'}}>{syncing ? 'Sincronizando...' : 'Sincronizado'}</span>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
       <div style={{flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minHeight:0}}>
-        {renderMain()}
+        <div key={screen + (selectedLot||'')} className="fade-in" style={{flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minHeight:0}}>
+          {renderMain()}
+        </div>
       </div>
 
       <NavBar active={screen} onChange={handleNav} alertCount={alertCount} />
