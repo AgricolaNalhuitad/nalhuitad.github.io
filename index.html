@@ -1,0 +1,1190 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>App Agrícola Nalhuitad</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script>
+// ── FIRESTORE REST API ────────────────────────────────
+const FS_PROJECT = 'nalhuitad-d6758';
+const FS_KEY     = 'AIzaSyCHlsJDU0o7JsOvY4mgr5lVhiDOEok3C5w';
+const FS_BASE    = `https://firestore.googleapis.com/v1/projects/${FS_PROJECT}/databases/(default)/documents`;
+
+function toFSValue(v) {
+  if (v === null || v === undefined) return { nullValue: null };
+  if (typeof v === 'boolean') return { booleanValue: v };
+  if (typeof v === 'number') return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
+  if (typeof v === 'string') return { stringValue: v };
+  if (Array.isArray(v)) return { arrayValue: { values: v.map(toFSValue) } };
+  if (typeof v === 'object') return { mapValue: { fields: toFSFields(v) } };
+}
+function toFSFields(obj) {
+  const f = {};
+  for (const [k, v] of Object.entries(obj)) f[k] = toFSValue(v);
+  return f;
+}
+function fromFSValue(v) {
+  if (!v) return null;
+  if ('stringValue'  in v) return v.stringValue;
+  if ('integerValue' in v) return parseInt(v.integerValue);
+  if ('doubleValue'  in v) return v.doubleValue;
+  if ('booleanValue' in v) return v.booleanValue;
+  if ('nullValue'    in v) return null;
+  if ('arrayValue'   in v) return (v.arrayValue.values || []).map(fromFSValue);
+  if ('mapValue'     in v) return fromFSDoc({ fields: v.mapValue.fields || {} });
+  return null;
+}
+function fromFSDoc(doc) {
+  const obj = {};
+  for (const [k, v] of Object.entries(doc.fields || {})) obj[k] = fromFSValue(v);
+  if (doc.name) obj.id = doc.name.split('/').pop();
+  return obj;
+}
+
+const fsDb = {
+  async list(col) {
+    const r = await fetch(`${FS_BASE}/${col}?key=${FS_KEY}`);
+    const j = await r.json();
+    return (j.documents || []).map(fromFSDoc);
+  },
+  async set(col, id, data) {
+    const { id: _id, ...rest } = data;
+    const body = JSON.stringify({ fields: toFSFields(rest) });
+    await fetch(`${FS_BASE}/${col}/${id}?key=${FS_KEY}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body
+    });
+  },
+  async del(col, id) {
+    await fetch(`${FS_BASE}/${col}/${id}?key=${FS_KEY}`, { method: 'DELETE' });
+  }
+};
+</script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body,#root{height:100%;width:100%;overflow:hidden}
+body{font-family:'DM Sans',sans-serif;background:#F7F7F4;color:#1A1A18}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useCallback } = React;
+
+const STAGES = {
+  almacigo:    { label: 'Almácigo',   color: '#A67C52', bg: '#F5EFE6', order: 0 },
+  transplante: { label: 'Transplante', color: '#2171B5', bg: '#E3F0FB', order: 1 },
+  raleo:       { label: 'Raleo',       color: '#276F50', bg: '#E2F3EC', order: 2 },
+  cosecha:     { label: 'Cosecha',     color: '#6B3FA0', bg: '#EEE8F7', order: 3 },
+};
+
+const VARIETIES = ['Milena', 'Otra'];
+const PLANTS_PER_TRAY = 128;
+const toPlants = (trays) => (trays ?? 0) * PLANTS_PER_TRAY;
+
+function daysSince(dateStr) {
+  const d = new Date(dateStr);
+  const now = new Date();
+  return Math.floor((now - d) / 86400000);
+}
+
+function formatDate(dateStr) {
+  const [y, m, d] = dateStr.split('-');
+  const months = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  return `${parseInt(d)} ${months[parseInt(m)-1]} ${y}`;
+}
+
+function todayISO() {
+  return new Date().toISOString().split('T')[0];
+}
+
+function genId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+}
+
+// ── SISTEMA DE ALERTAS ────────────────────────────────
+// Estaciones hemisferio sur
+function getSeason(dateStr) {
+  const m = new Date(dateStr).getMonth() + 1;
+  if ([12,1,2].includes(m)) return 'verano';
+  if ([3,4,5].includes(m)) return 'otono';
+  if ([6,7,8].includes(m)) return 'invierno';
+  return 'primavera';
+}
+
+const STAGE_DAYS = {
+  almacigo:    { verano:28, otono:32, invierno:35, primavera:30 },
+  transplante: { verano:15, otono:15, invierno:15, primavera:15 },
+  raleo:       { verano:22, otono:35, invierno:50, primavera:28 },
+};
+
+function getLotAlert(lot) {
+  if (lot.stage === 'cosecha') return null;
+  const expected = STAGE_DAYS[lot.stage];
+  if (!expected) return null;
+  const stageEntry = lot.stageHistory[lot.stageHistory.length - 1];
+  const season = getSeason(stageEntry.date);
+  const maxDays = expected[season];
+  const days = daysSince(stageEntry.date);
+  const remaining = maxDays - days;
+  if (remaining < 0)  return { status:'overdue',  remaining, maxDays, days, season };
+  if (remaining <= 3) return { status:'warning',  remaining, maxDays, days, season };
+  return { status:'ok', remaining, maxDays, days, season };
+}
+
+const SEASON_LABEL = { verano:'Verano', otono:'Otoño', invierno:'Invierno', primavera:'Primavera' };
+
+// ── BADGE ──────────────────────────────────────────────
+function StageBadge({ stage, days }) {
+  const s = STAGES[stage];
+  return (
+    <span style={{
+      display:'inline-flex', alignItems:'center', gap:6,
+      background: s.bg, color: s.color,
+      fontSize:13, fontWeight:500,
+      padding:'5px 12px', borderRadius:20,
+      letterSpacing:'0.01em'
+    }}>
+      {s.label}
+      {days !== undefined && <span style={{opacity:0.7, fontFamily:'DM Mono, monospace', fontSize:11}}>· día {days}</span>}
+    </span>
+  );
+}
+
+// ── LOTES SCREEN ───────────────────────────────────────
+function LotesScreen({ lots, onSelect }) {
+  const active = lots.filter(l => l.stage !== 'cosecha');
+  const cosechados = lots.filter(l => l.stage === 'cosecha');
+  const [editingCap, setEditingCap] = useState(false);
+  const [capacidad, setCapacidad] = useState(() => {
+    try { return parseInt(localStorage.getItem('hidro_capacidad') || '3740'); }
+    catch { return 3740; }
+  });
+  const [capInput, setCapInput] = useState(String(capacidad));
+
+  const saveCapacidad = () => {
+    const val = parseInt(capInput);
+    if (!isNaN(val) && val > 0) {
+      setCapacidad(val);
+      localStorage.setItem('hidro_capacidad', String(val));
+    }
+    setEditingCap(false);
+  };
+
+  if (lots.length === 0) {
+    return (
+      <div style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:32, textAlign:'center'}}>
+        <div style={{width:60, height:60, borderRadius:16, background:'#E8F2EB', display:'flex', alignItems:'center', justifyContent:'center', marginBottom:16}}>
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#276F50" strokeWidth="1.8" strokeLinecap="round">
+            <path d="M12 2a9 9 0 0 1 9 9c0 4.97-9 13-9 13S3 15.97 3 11a9 9 0 0 1 9-9z"/>
+            <circle cx="12" cy="11" r="2.5"/>
+          </svg>
+        </div>
+        <p style={{fontSize:15, fontWeight:500, color:'#1A1A18', marginBottom:6}}>Sin lotes registrados</p>
+        <p style={{fontSize:13, color:'#888884', lineHeight:1.6}}>Tocá "Nuevo" en el menú para<br/>registrar tu primer lote.</p>
+      </div>
+    );
+  }
+
+  const countByStage = (stage) =>
+    lots.filter(l => l.stage === stage).reduce((acc, l) => acc + (l.currentQuantity ?? toPlants(l.quantity)), 0);
+
+  const stageCounters = [
+    { key:'almacigo',    label:'Almácigo' },
+    { key:'transplante', label:'Transplante' },
+    { key:'raleo',       label:'Raleo' },
+    { key:'cosecha',     label:'Cosecha' },
+  ].filter(s => countByStage(s.key) > 0);
+
+  return (
+    <div style={{flex:1, overflowY:'auto', padding:'16px 16px 8px'}}>
+
+      {stageCounters.length > 0 && (
+        <>
+        <div style={{
+          background:'#1A1A18', borderRadius:14, padding:'16px 18px',
+          marginBottom:8,
+        }}>
+          <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:14}}>
+            <div>
+              <p style={{fontSize:12, fontWeight:600, color:'#AAAAAA', letterSpacing:'0.05em', textTransform:'uppercase', marginBottom:6}}>Total en producción</p>
+              <p style={{fontSize:30, fontWeight:600, color:'#FFFFFF', fontFamily:'DM Mono, monospace', lineHeight:1}}>
+                {lots.filter(l => l.stage !== 'cosecha').reduce((acc, l) => acc + (l.currentQuantity ?? toPlants(l.quantity)), 0).toLocaleString()}
+              </p>
+              <p style={{fontSize:13, color:'#888884', marginTop:5}}>plantas · {lots.filter(l=>l.stage!=='cosecha').length} lotes activos</p>
+            </div>
+            <div style={{textAlign:'right'}}>
+              <p style={{fontSize:12, color:'#AAAAAA', marginBottom:6}}>Capacidad instalada</p>
+              {editingCap ? (
+                <div style={{display:'flex', gap:6, alignItems:'center'}}>
+                  <input
+                    type="number" inputMode="numeric"
+                    value={capInput}
+                    onChange={e => setCapInput(e.target.value)}
+                    style={{width:80, padding:'4px 8px', borderRadius:8, border:'0.5px solid #444', background:'#2A2A28', color:'#fff', fontSize:14, fontFamily:'DM Mono, monospace', outline:'none', textAlign:'right'}}
+                    autoFocus
+                    onKeyDown={e => e.key === 'Enter' && saveCapacidad()}
+                  />
+                  <button onClick={saveCapacidad} style={{background:'#276F50', border:'none', borderRadius:6, padding:'4px 10px', color:'#fff', fontSize:12, fontWeight:600, cursor:'pointer'}}>OK</button>
+                </div>
+              ) : (
+                <div style={{display:'flex', alignItems:'center', gap:8, justifyContent:'flex-end'}}>
+                  <p style={{fontSize:17, fontWeight:500, color:'#FFFFFF', fontFamily:'DM Mono, monospace'}}>{capacidad.toLocaleString()}</p>
+                  <button onClick={() => { setCapInput(String(capacidad)); setEditingCap(true); }} style={{background:'#2A2A28', border:'0.5px solid #444', borderRadius:6, padding:'3px 8px', color:'#AAAAAA', fontSize:11, cursor:'pointer'}}>editar</button>
+                </div>
+              )}
+              <p style={{fontSize:11, color:'#AAAAAA', marginTop:4}}>plantas máximas</p>
+            </div>
+          </div>
+          <div style={{height:6, background:'#333330', borderRadius:3, overflow:'hidden'}}>
+            <div style={{
+              height:'100%', borderRadius:3, background:'#276F50',
+              width:`${Math.min(100, Math.round((lots.filter(l=>l.stage!=='cosecha').reduce((acc,l)=>acc+(l.currentQuantity??toPlants(l.quantity)),0)/capacidad)*100))}%`,
+              transition:'width 0.4s'
+            }}/>
+          </div>
+          <p style={{fontSize:11, color:'#AAAAAA', marginTop:5, textAlign:'right'}}>
+            {Math.min(100, Math.round((lots.filter(l=>l.stage!=='cosecha').reduce((acc,l)=>acc+(l.currentQuantity??toPlants(l.quantity)),0)/capacidad)*100))}% de capacidad utilizada
+          </p>
+        </div>
+        <div style={{
+          display:'grid',
+          gridTemplateColumns: `repeat(${Math.min(stageCounters.length, 2)}, 1fr)`,
+          gap:8, marginBottom:20
+        }}>
+          {stageCounters.map(({ key, label }) => {
+            const s = STAGES[key];
+            const count = countByStage(key);
+            const lotCount = lots.filter(l => l.stage === key).length;
+            return (
+              <div key={key} style={{
+                background:'#fff', border:`0.5px solid ${s.bg}`,
+                borderRadius:14, padding:'16px 18px',
+              }}>
+                <div style={{display:'flex', alignItems:'center', gap:6, marginBottom:8}}>
+                  <div style={{width:8, height:8, borderRadius:4, background: s.color, flexShrink:0}} />
+                  <span style={{fontSize:12, fontWeight:600, color: s.color, letterSpacing:'0.02em'}}>
+                    {STAGE_LABELS[key]}
+                  </span>
+                </div>
+                <p style={{fontSize:28, fontWeight:600, color:'#1A1A18', fontFamily:'DM Mono, monospace', lineHeight:1}}>
+                  {count.toLocaleString()}
+                </p>
+                <p style={{fontSize:12, color:'#555550', marginTop:5}}>
+                  plantas · {lotCount} lote{lotCount !== 1 ? 's' : ''}
+                </p>
+                {key === 'almacigo' && (
+                  <p style={{fontSize:11, color:'#888884', marginTop:2}}>
+                    {lots.filter(l=>l.stage==='almacigo').reduce((a,l)=>a+l.quantity,0)} almácigos × 128
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        </>
+      )}
+
+      {active.length > 0 && (
+        <>
+          <p style={{fontSize:12, fontWeight:600, letterSpacing:'0.06em', color:'#555550', textTransform:'uppercase', marginBottom:12}}>
+            En curso · {active.length} lote{active.length !== 1 ? 's' : ''}
+          </p>
+          {active.map(lot => (
+            <LotCard key={lot.id} lot={lot} onSelect={onSelect} />
+          ))}
+        </>
+      )}
+      {cosechados.length > 0 && (
+        <>
+          <p style={{fontSize:12, fontWeight:600, letterSpacing:'0.06em', color:'#555550', textTransform:'uppercase', margin:'20px 0 12px'}}>
+            Cosechados · {cosechados.length}
+          </p>
+          {cosechados.map(lot => (
+            <LotCard key={lot.id} lot={lot} onSelect={onSelect} muted />
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
+function LotCard({ lot, onSelect, muted }) {
+  const currentStageDate = lot.stageHistory[lot.stageHistory.length - 1].date;
+  const days = daysSince(currentStageDate);
+  const alert = getLotAlert(lot);
+
+  const alertBorder = alert?.status === 'overdue' ? '#E05C3A'
+    : alert?.status === 'warning' ? '#E07B2A' : '#E0E0DA';
+
+  return (
+    <div
+      onClick={() => onSelect(lot)}
+      style={{
+        background:'#fff', border:`0.5px solid ${alertBorder}`,
+        borderRadius:14, padding:'16px 18px',
+        marginBottom:10, cursor:'pointer',
+        opacity: muted ? 0.55 : 1,
+        transition:'transform 0.1s',
+        WebkitUserSelect:'none',
+      }}
+      onTouchStart={e => e.currentTarget.style.transform='scale(0.985)'}
+      onTouchEnd={e => e.currentTarget.style.transform='scale(1)'}
+    >
+      <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:10}}>
+        <div style={{flex:1, minWidth:0, marginRight:8}}>
+          <p style={{fontSize:12, fontWeight:600, color: STAGES[lot.stage].color, letterSpacing:'0.03em', textTransform:'uppercase', marginBottom:4}}>
+            {STAGE_LABELS[lot.stage]}
+          </p>
+          <p style={{fontSize:16, fontWeight:600, color:'#1A1A18', marginBottom:3}}>{lot.name}</p>
+          <p style={{fontSize:13, color:'#555550'}}>Sembrado {formatDate(lot.date)}</p>
+        </div>
+        <div style={{display:'flex', flexDirection:'column', alignItems:'flex-end', gap:5, flexShrink:0}}>
+          <StageBadge stage={lot.stage} days={days} />
+          {alert && alert.status !== 'ok' && (
+            <span style={{
+              fontSize:11, fontWeight:600, padding:'4px 10px', borderRadius:20,
+              background: alert.status === 'overdue' ? '#FEF0EC' : '#FEF5EC',
+              color: alert.status === 'overdue' ? '#E05C3A' : '#E07B2A',
+            }}>
+              {alert.status === 'overdue'
+                ? `${Math.abs(alert.remaining)} día${Math.abs(alert.remaining)!==1?'s':''} atrasado`
+                : `Vence en ${alert.remaining} día${alert.remaining!==1?'s':''}`}
+            </span>
+          )}
+        </div>
+      </div>
+      <div style={{display:'flex', gap:20, marginTop:8, paddingTop:10, borderTop:'0.5px solid #F0F0EA'}}>
+        <Stat label="Almácigos" value={lot.quantity} />
+        <Stat label="Plantas al sembrar" value={toPlants(lot.quantity).toLocaleString()} />
+        <Stat label="En producción" value={(lot.currentQuantity ?? toPlants(lot.quantity)).toLocaleString()} />
+      </div>
+    </div>
+  );
+}
+
+function Stat({ label, value }) {
+  return (
+    <div>
+      <p style={{fontSize:11, color:'#888884', marginBottom:3, letterSpacing:'0.02em'}}>{label}</p>
+      <p style={{fontSize:14, fontWeight:600, color:'#1A1A18', fontFamily:'DM Mono, monospace'}}>{value}</p>
+    </div>
+  );
+}
+
+// ── NUEVO SCREEN ───────────────────────────────────────
+function NuevoScreen({ onSave, goToLotes }) {
+  const [form, setForm] = useState({
+    name: '', variety: 'Milena', date: todayISO(), quantity: '', notes: ''
+  });
+  const [saved, setSaved] = useState(false);
+  const [errors, setErrors] = useState({});
+
+  const set = (key, val) => setForm(f => ({ ...f, [key]: val }));
+
+  const validate = () => {
+    const e = {};
+    if (!form.name.trim()) e.name = 'Ingresá un nombre para el lote';
+    if (!form.quantity || isNaN(form.quantity) || parseInt(form.quantity) <= 0)
+      e.quantity = 'Ingresá una cantidad válida';
+    return e;
+  };
+
+  const handleSave = () => {
+    const e = validate();
+    if (Object.keys(e).length) { setErrors(e); return; }
+
+    const lot = {
+      id: genId(),
+      name: form.name.trim(),
+      variety: form.variety,
+      date: form.date,
+      quantity: parseInt(form.quantity),
+      currentQuantity: toPlants(parseInt(form.quantity)),
+      stage: 'almacigo',
+      stageHistory: [{ stage: 'almacigo', date: form.date, quantity: toPlants(parseInt(form.quantity)) }],
+      notes: form.notes.trim(),
+    };
+    onSave(lot);
+    setSaved(true);
+    setTimeout(() => {
+      setSaved(false);
+      setForm({ name:'', variety:'Milena', date:todayISO(), quantity:'', notes:'' });
+      setErrors({});
+      goToLotes();
+    }, 1200);
+  };
+
+  return (
+    <div style={{flex:1, overflowY:'auto', padding:16}}>
+      <p style={{fontSize:13, fontWeight:600, letterSpacing:'0.06em', color:'#555550', textTransform:'uppercase', marginBottom:20}}>
+        Registrar lote nuevo
+      </p>
+
+      <Field label="Nombre del lote" error={errors.name}>
+        <input
+          type="text"
+          placeholder="Ej: Milena norte, Lote 4..."
+          value={form.name}
+          onChange={e => { set('name', e.target.value); setErrors(er => ({...er, name:undefined})) }}
+          style={inputStyle(errors.name)}
+        />
+      </Field>
+
+      <Field label="Fecha de siembra">
+        <input
+          type="date"
+          value={form.date}
+          onChange={e => set('date', e.target.value)}
+          style={inputStyle()}
+        />
+      </Field>
+
+      <Field label="Cantidad de almácigos sembrados" error={errors.quantity}>
+        <input
+          type="number"
+          inputMode="numeric"
+          placeholder="Ej: 300"
+          value={form.quantity}
+          onChange={e => { set('quantity', e.target.value); setErrors(er => ({...er, quantity:undefined})) }}
+          style={inputStyle(errors.quantity)}
+        />
+      </Field>
+
+      <Field label="Variedad">
+        <div style={{display:'flex', gap:8}}>
+          {VARIETIES.map(v => (
+            <button
+              key={v}
+              onClick={() => set('variety', v)}
+              style={{
+                flex:1, padding:'10px 0', borderRadius:10, border:'0.5px solid',
+                borderColor: form.variety === v ? '#276F50' : '#E0E0DA',
+                background: form.variety === v ? '#E2F3EC' : '#fff',
+                color: form.variety === v ? '#276F50' : '#888884',
+                fontSize:13, fontWeight: form.variety === v ? 600 : 400,
+                cursor:'pointer', transition:'all 0.15s'
+              }}
+            >{v}</button>
+          ))}
+        </div>
+      </Field>
+
+      <Field label="Notas (opcional)">
+        <textarea
+          placeholder="Condiciones, observaciones..."
+          value={form.notes}
+          onChange={e => set('notes', e.target.value)}
+          rows={3}
+          style={{...inputStyle(), resize:'none', lineHeight:1.6}}
+        />
+      </Field>
+
+      <button
+        onClick={handleSave}
+        style={{
+          width:'100%', padding:'14px 0', borderRadius:12, border:'none',
+          background: saved ? '#276F50' : '#1A1A18',
+          color:'#fff', fontSize:15, fontWeight:600,
+          cursor:'pointer', transition:'background 0.3s',
+          marginTop:8, marginBottom:24,
+          display:'flex', alignItems:'center', justifyContent:'center', gap:8
+        }}
+      >
+        {saved ? '✓ Lote guardado' : 'Guardar lote'}
+      </button>
+    </div>
+  );
+}
+
+function Field({ label, error, children }) {
+  return (
+    <div style={{marginBottom:18}}>
+      <p style={{fontSize:13, fontWeight:500, color: error ? '#C0392B' : '#333330', marginBottom:7}}>{label}</p>
+      {children}
+      {error && <p style={{fontSize:12, color:'#C0392B', marginTop:5}}>{error}</p>}
+    </div>
+  );
+}
+
+function inputStyle(error) {
+  return {
+    width:'100%', padding:'12px 14px', borderRadius:10,
+    border: `0.5px solid ${error ? '#E57373' : '#D8D8D2'}`,
+    background:'#fff', fontSize:14, color:'#1A1A18',
+    fontFamily:'DM Sans, sans-serif', outline:'none',
+    WebkitAppearance:'none',
+  };
+}
+
+// ── STAGE ORDER ───────────────────────────────────────
+const STAGE_LABELS = {
+  almacigo:    'Etapa 1 · Siembra de almácigos',
+  transplante: 'Etapa 2 · Transplante',
+  raleo:       'Etapa 3 · Raleo definitivo',
+  cosecha:     'Etapa 4 · Cosecha',
+};
+const STAGE_ORDER = ['almacigo','transplante','raleo','cosecha'];
+const NEXT_STAGE = { almacigo:'transplante', transplante:'raleo', raleo:'cosecha' };
+
+// ── MODAL AVANZAR ETAPA ────────────────────────────────
+function AvanzarModal({ lot, onClose, onConfirm }) {
+  const nextStage = NEXT_STAGE[lot.stage];
+  const nextInfo = STAGES[nextStage];
+  const currentQty = lot.currentQuantity ?? toPlants(lot.quantity);
+  const [date, setDate] = useState(todayISO());
+  const [qty, setQty] = useState(String(currentQty));
+  const [notes, setNotes] = useState('');
+  const [error, setError] = useState('');
+
+  const arrived = parseInt(qty) || 0;
+  const merma = currentQty - arrived;
+  const mermaPercent = currentQty > 0 ? Math.round((merma / currentQty) * 100) : 0;
+
+  const handleConfirm = () => {
+    if (!qty || isNaN(qty) || arrived <= 0) { setError('Ingresá una cantidad válida'); return; }
+    if (arrived > currentQty) { setError(`No puede superar las ${currentQty} plantas actuales`); return; }
+    onConfirm({ nextStage, date, quantity: arrived, notes: notes.trim() });
+  };
+
+  return (
+    <div style={{
+      position:'fixed', inset:0, background:'rgba(0,0,0,0.45)',
+      display:'flex', alignItems:'flex-end', justifyContent:'center',
+      zIndex:100
+    }} onClick={e => { if(e.target===e.currentTarget) onClose(); }}>
+      <div style={{
+        background:'#F7F7F4', borderRadius:'20px 20px 0 0',
+        width:'100%', maxWidth:480, padding:'20px 20px 36px',
+        maxHeight:'90vh', overflowY:'auto'
+      }}>
+        <div style={{width:36, height:4, background:'#D8D8D2', borderRadius:2, margin:'0 auto 20px'}} />
+
+        <p style={{fontSize:17, fontWeight:600, color:'#1A1A18', marginBottom:4}}>Avanzar a siguiente etapa</p>
+        <p style={{fontSize:13, color:'#888884', marginBottom:20}}>
+          <span style={{fontWeight:500, color: STAGES[lot.stage].color}}>{STAGES[lot.stage].label}</span>
+          {' → '}
+          <span style={{fontWeight:500, color: nextInfo.color}}>{nextInfo.label}</span>
+        </p>
+
+        <Field label="Fecha del movimiento">
+          <input type="date" value={date} onChange={e => setDate(e.target.value)} style={inputStyle()} />
+        </Field>
+
+        <Field label={`Plantas que llegan a ${nextInfo.label}`} error={error}>
+          <input
+            type="number" inputMode="numeric"
+            value={qty}
+            onChange={e => { setQty(e.target.value); setError(''); }}
+            style={inputStyle(error)}
+            placeholder={`Máx. ${currentQty}`}
+          />
+        </Field>
+
+        {qty && !isNaN(qty) && parseInt(qty) > 0 && parseInt(qty) <= currentQty && (
+          <div style={{
+            background:'#fff', border:'0.5px solid #E0E0DA',
+            borderRadius:12, padding:'12px 16px', marginBottom:16,
+            display:'flex', gap:0
+          }}>
+            <MermaItem label="Entraban" value={currentQty} color="#1A1A18" />
+            <MermaItem label="Llegan" value={arrived} color={nextInfo.color} />
+            <MermaItem
+              label="Merma"
+              value={`${merma} (${mermaPercent}%)`}
+              color={mermaPercent > 20 ? '#C0392B' : mermaPercent > 10 ? '#E07B2A' : '#276F50'}
+            />
+          </div>
+        )}
+
+        <Field label="Observaciones del movimiento (opcional)">
+          <textarea value={notes} onChange={e => setNotes(e.target.value)}
+            rows={2} placeholder="Ej: se descartaron plantas con raíz débil..."
+            style={{...inputStyle(), resize:'none', lineHeight:1.6}} />
+        </Field>
+
+        <button onClick={handleConfirm} style={{
+          width:'100%', padding:'14px 0', borderRadius:12, border:'none',
+          background: nextInfo.color, color:'#fff',
+          fontSize:15, fontWeight:600, cursor:'pointer', marginTop:4
+        }}>
+          Confirmar movimiento
+        </button>
+        <button onClick={onClose} style={{
+          width:'100%', padding:'12px 0', borderRadius:12, border:'none',
+          background:'none', color:'#888884', fontSize:14, cursor:'pointer', marginTop:6
+        }}>
+          Cancelar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function MermaItem({ label, value, color }) {
+  return (
+    <div style={{flex:1, textAlign:'center'}}>
+      <p style={{fontSize:10, color:'#AAAA9F', marginBottom:3}}>{label}</p>
+      <p style={{fontSize:13, fontWeight:600, color, fontFamily:'DM Mono, monospace'}}>{value}</p>
+    </div>
+  );
+}
+
+// ── DETALLE LOTE ───────────────────────────────────────
+function DetalleLote({ lot, onBack, backLabel = 'Volver', onUpdate, onDelete }) {
+  const [editing, setEditing] = useState(false);
+  const [showAvanzar, setShowAvanzar] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const handleAvanzar = ({ nextStage, date, quantity, notes: moveNotes }) => {
+    const updated = {
+      ...lot,
+      stage: nextStage,
+      currentQuantity: quantity,
+      stageHistory: [
+        ...lot.stageHistory,
+        { stage: nextStage, date, quantity, notes: moveNotes }
+      ]
+    };
+    onUpdate(updated);
+    setShowAvanzar(false);
+  };
+  const [form, setForm] = useState({
+    name: lot.name, variety: lot.variety,
+    date: lot.date, quantity: String(lot.quantity), notes: lot.notes || ''
+  });
+  const [errors, setErrors] = useState({});
+  const [saved, setSaved] = useState(false);
+
+  const set = (key, val) => setForm(f => ({...f, [key]: val}));
+
+  const validate = () => {
+    const e = {};
+    if (!form.name.trim()) e.name = 'Ingresá un nombre';
+    if (!form.quantity || isNaN(form.quantity) || parseInt(form.quantity) <= 0)
+      e.quantity = 'Cantidad inválida';
+    return e;
+  };
+
+  const handleUpdate = () => {
+    const e = validate();
+    if (Object.keys(e).length) { setErrors(e); return; }
+    const updated = {
+      ...lot,
+      name: form.name.trim(),
+      variety: form.variety,
+      date: form.date,
+      quantity: parseInt(form.quantity),
+      notes: form.notes.trim(),
+    };
+    onUpdate(updated);
+    setSaved(true);
+    setTimeout(() => { setSaved(false); setEditing(false); }, 1000);
+  };
+
+  if (editing) {
+    return (
+      <div style={{flex:1, overflowY:'auto', padding:16}}>
+        <button onClick={() => setEditing(false)} style={{display:'flex', alignItems:'center', gap:6, background:'none', border:'none', color:'#276F50', fontSize:13, fontWeight:500, cursor:'pointer', marginBottom:16, padding:0}}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M19 12H5M12 5l-7 7 7 7"/></svg>
+          Cancelar
+        </button>
+        <p style={{fontSize:15, fontWeight:600, color:'#1A1A18', marginBottom:16}}>Editar lote</p>
+
+        <Field label="Nombre del lote" error={errors.name}>
+          <input type="text" value={form.name}
+            onChange={e => { set('name', e.target.value); setErrors(er => ({...er, name:undefined})); }}
+            style={inputStyle(errors.name)} />
+        </Field>
+        <Field label="Fecha de siembra">
+          <input type="date" value={form.date}
+            onChange={e => set('date', e.target.value)}
+            style={inputStyle()} />
+        </Field>
+        <Field label="Cantidad de almácigos sembrados" error={errors.quantity}>
+          <input type="number" inputMode="numeric" value={form.quantity}
+            onChange={e => { set('quantity', e.target.value); setErrors(er => ({...er, quantity:undefined})); }}
+            style={inputStyle(errors.quantity)} />
+        </Field>
+        <Field label="Variedad">
+          <div style={{display:'flex', gap:8}}>
+            {VARIETIES.map(v => (
+              <button key={v} onClick={() => set('variety', v)} style={{
+                flex:1, padding:'10px 0', borderRadius:10, border:'0.5px solid',
+                borderColor: form.variety === v ? '#276F50' : '#E0E0DA',
+                background: form.variety === v ? '#E2F3EC' : '#fff',
+                color: form.variety === v ? '#276F50' : '#888884',
+                fontSize:13, fontWeight: form.variety === v ? 600 : 400, cursor:'pointer'
+              }}>{v}</button>
+            ))}
+          </div>
+        </Field>
+        <Field label="Notas (opcional)">
+          <textarea value={form.notes} onChange={e => set('notes', e.target.value)}
+            rows={3} style={{...inputStyle(), resize:'none', lineHeight:1.6}} />
+        </Field>
+
+        <button onClick={handleUpdate} style={{
+          width:'100%', padding:'14px 0', borderRadius:12, border:'none',
+          background: saved ? '#276F50' : '#1A1A18',
+          color:'#fff', fontSize:15, fontWeight:600, cursor:'pointer',
+          transition:'background 0.3s', marginTop:8, marginBottom:24
+        }}>
+          {saved ? '✓ Guardado' : 'Guardar cambios'}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <>
+    {showAvanzar && <AvanzarModal lot={lot} onClose={() => setShowAvanzar(false)} onConfirm={handleAvanzar} />}
+    <div style={{flex:1, overflowY:'auto', padding:16}}>
+      <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16}}>
+        <button onClick={onBack} style={{display:'flex', alignItems:'center', gap:6, background:'none', border:'none', color:'#276F50', fontSize:13, fontWeight:500, cursor:'pointer', padding:0}}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M19 12H5M12 5l-7 7 7 7"/></svg>
+          {backLabel}
+        </button>
+        <button onClick={() => setEditing(true)} style={{
+          display:'flex', alignItems:'center', gap:5,
+          background:'#F2F2EC', border:'0.5px solid #E0E0DA',
+          borderRadius:20, padding:'6px 14px',
+          fontSize:12, fontWeight:500, color:'#555550', cursor:'pointer'
+        }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+          </svg>
+          Editar
+        </button>
+      </div>
+
+      <p style={{fontSize:18, fontWeight:600, color:'#1A1A18', marginBottom:4}}>{lot.name}</p>
+      <p style={{fontSize:13, color:'#888884', marginBottom:16}}>Sembrado el {formatDate(lot.date)}</p>
+
+      <StageBadge stage={lot.stage} days={daysSince(lot.stageHistory[lot.stageHistory.length-1].date)} />
+
+      <div style={{background:'#fff', border:'0.5px solid #E0E0DA', borderRadius:14, padding:'14px 16px', marginTop:16}}>
+        <Row label="Variedad" value={lot.variety} />
+        <Row label="Almácigos sembrados" value={`${lot.quantity} (× ${PLANTS_PER_TRAY} plantas)`} />
+        <Row label="Plantas al sembrar" value={toPlants(lot.quantity).toLocaleString()} />
+        <Row label="Plantas en producción" value={(lot.currentQuantity ?? toPlants(lot.quantity)).toLocaleString()} />
+        {lot.notes && <Row label="Notas" value={lot.notes} />}
+      </div>
+
+      <p style={{fontSize:11, fontWeight:600, letterSpacing:'0.08em', color:'#888884', textTransform:'uppercase', margin:'20px 0 10px'}}>Historial de etapas</p>
+      <div style={{background:'#fff', border:'0.5px solid #E0E0DA', borderRadius:14, overflow:'hidden', marginBottom:24}}>
+        {lot.stageHistory.map((h, i) => (
+          <div key={i} style={{
+            display:'flex', justifyContent:'space-between', alignItems:'center',
+            padding:'12px 16px',
+            borderBottom: i < lot.stageHistory.length-1 ? '0.5px solid #F0F0EA' : 'none'
+          }}>
+            <div style={{display:'flex', alignItems:'center', gap:10}}>
+              <div style={{width:8, height:8, borderRadius:4, background: STAGES[h.stage].color}} />
+              <div>
+                <span style={{fontSize:13, fontWeight:500, display:'block'}}>{STAGES[h.stage].label}</span>
+                {h.notes && <span style={{fontSize:11, color:'#888884'}}>{h.notes}</span>}
+              </div>
+            </div>
+            <div style={{textAlign:'right'}}>
+              <p style={{fontSize:12, color:'#1A1A18', fontFamily:'DM Mono, monospace'}}>{formatDate(h.date)}</p>
+              <p style={{fontSize:11, color:'#888884'}}>{h.quantity} plantas</p>
+              {i > 0 && (() => {
+                const prev = lot.stageHistory[i-1].quantity;
+                const diff = prev - h.quantity;
+                const pct = Math.round((diff / prev) * 100);
+                return diff > 0
+                  ? <p style={{fontSize:10, color: pct > 20 ? '#C0392B' : '#E07B2A'}}>↓ {diff} ({pct}%)</p>
+                  : null;
+              })()}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {NEXT_STAGE[lot.stage] && (
+        <button onClick={() => setShowAvanzar(true)} style={{
+          width:'100%', padding:'14px 0', borderRadius:12, border:'none',
+          background: STAGES[NEXT_STAGE[lot.stage]].color,
+          color:'#fff', fontSize:15, fontWeight:600, cursor:'pointer',
+          display:'flex', alignItems:'center', justifyContent:'center', gap:8,
+          marginBottom:12
+        }}>
+          Avanzar a {STAGES[NEXT_STAGE[lot.stage]].label}
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </button>
+      )}
+
+      {!confirmDelete ? (
+        <button onClick={() => setConfirmDelete(true)} style={{
+          width:'100%', padding:'12px 0', borderRadius:12, border:'0.5px solid #E0D8D8',
+          background:'none', color:'#B05050', fontSize:13, fontWeight:500,
+          cursor:'pointer', marginBottom:24
+        }}>
+          Eliminar lote
+        </button>
+      ) : (
+        <div style={{
+          background:'#FEF0EC', border:'0.5px solid #F5C4B3',
+          borderRadius:12, padding:'14px 16px', marginBottom:24
+        }}>
+          <p style={{fontSize:13, fontWeight:600, color:'#1A1A18', marginBottom:4}}>¿Eliminar este lote?</p>
+          <p style={{fontSize:12, color:'#888884', marginBottom:12}}>Esta acción no se puede deshacer.</p>
+          <div style={{display:'flex', gap:8}}>
+            <button onClick={() => setConfirmDelete(false)} style={{
+              flex:1, padding:'10px 0', borderRadius:10,
+              border:'0.5px solid #E0E0DA', background:'#fff',
+              color:'#555550', fontSize:13, fontWeight:500, cursor:'pointer'
+            }}>Cancelar</button>
+            <button onClick={() => onDelete(lot.id)} style={{
+              flex:1, padding:'10px 0', borderRadius:10,
+              border:'none', background:'#C0392B',
+              color:'#fff', fontSize:13, fontWeight:600, cursor:'pointer'
+            }}>Sí, eliminar</button>
+          </div>
+        </div>
+      )}
+    </div>
+    </>
+  );
+}
+
+function Row({ label, value }) {
+  return (
+    <div style={{display:'flex', justifyContent:'space-between', alignItems:'baseline', padding:'6px 0', borderBottom:'0.5px solid #F5F5F0'}}>
+      <span style={{fontSize:12, color:'#888884'}}>{label}</span>
+      <span style={{fontSize:13, fontWeight:500, color:'#1A1A18', fontFamily:'DM Mono, monospace', textAlign:'right', maxWidth:'60%'}}>{value}</span>
+    </div>
+  );
+}
+
+// ── ALERTAS SCREEN ────────────────────────────────────
+function AlertasScreen({ lots, onSelect }) {
+  const active = lots.filter(l => l.stage !== 'cosecha');
+  const withAlerts = active
+    .map(l => ({ lot: l, alert: getLotAlert(l) }))
+    .filter(({ alert }) => alert && alert.status !== 'ok')
+    .sort((a, b) => a.alert.remaining - b.alert.remaining);
+
+  const okLots = active
+    .map(l => ({ lot: l, alert: getLotAlert(l) }))
+    .filter(({ alert }) => alert && alert.status === 'ok')
+    .sort((a, b) => a.alert.remaining - b.alert.remaining);
+
+  if (active.length === 0) {
+    return (
+      <div style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:32, textAlign:'center'}}>
+        <div style={{width:60, height:60, borderRadius:16, background:'#E8F2EB', display:'flex', alignItems:'center', justifyContent:'center', marginBottom:16}}>
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#276F50" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        </div>
+        <p style={{fontSize:15, fontWeight:500, color:'#1A1A18', marginBottom:6}}>Sin lotes activos</p>
+        <p style={{fontSize:13, color:'#888884'}}>Registrá un lote para ver alertas.</p>
+      </div>
+    );
+  }
+
+  if (withAlerts.length === 0) {
+    return (
+      <div style={{flex:1, overflowY:'auto', padding:16}}>
+        <div style={{
+          background:'#E8F3EC', borderRadius:14, padding:'16px 18px', marginBottom:20,
+          display:'flex', alignItems:'center', gap:12
+        }}>
+          <div style={{width:36, height:36, borderRadius:10, background:'#C2E0CE', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0}}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#276F50" strokeWidth="2.2" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+          </div>
+          <div>
+            <p style={{fontSize:14, fontWeight:600, color:'#1A1A18', marginBottom:2}}>Todo en orden</p>
+            <p style={{fontSize:12, color:'#555550'}}>Ningún lote requiere atención inmediata.</p>
+          </div>
+        </div>
+        <p style={{fontSize:12, fontWeight:600, letterSpacing:'0.06em', color:'#555550', textTransform:'uppercase', marginBottom:12}}>Próximos vencimientos</p>
+        {okLots.map(({ lot, alert }) => <AlertCard key={lot.id} lot={lot} alert={alert} onSelect={onSelect} />)}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{flex:1, overflowY:'auto', padding:16}}>
+      {withAlerts.length > 0 && (
+        <>
+          <p style={{fontSize:12, fontWeight:600, letterSpacing:'0.06em', color:'#E05C3A', textTransform:'uppercase', marginBottom:12}}>
+            Requieren atención · {withAlerts.length}
+          </p>
+          {withAlerts.map(({ lot, alert }) => <AlertCard key={lot.id} lot={lot} alert={alert} onSelect={onSelect} />)}
+        </>
+      )}
+      {okLots.length > 0 && (
+        <>
+          <p style={{fontSize:12, fontWeight:600, letterSpacing:'0.06em', color:'#555550', textTransform:'uppercase', margin:'20px 0 12px'}}>
+            En plazo · {okLots.length}
+          </p>
+          {okLots.map(({ lot, alert }) => <AlertCard key={lot.id} lot={lot} alert={alert} onSelect={onSelect} />)}
+        </>
+      )}
+    </div>
+  );
+}
+
+function AlertCard({ lot, alert, onSelect }) {
+  const isOverdue = alert.status === 'overdue';
+  const isWarning = alert.status === 'warning';
+  const accentColor = isOverdue ? '#E05C3A' : isWarning ? '#E07B2A' : '#276F50';
+  const accentBg   = isOverdue ? '#FEF0EC' : isWarning ? '#FEF5EC' : '#E8F3EC';
+  const borderColor = isOverdue||isWarning ? accentColor+'55' : '#E0E0DA';
+  const progressPct = Math.min(100, Math.round((alert.days / alert.maxDays) * 100));
+
+  return (
+    <div onClick={() => onSelect(lot)} style={{
+      background:'#fff', border:`0.5px solid ${borderColor}`,
+      borderRadius:14, padding:'16px 18px', marginBottom:10, cursor:'pointer',
+      WebkitUserSelect:'none', transition:'transform 0.1s',
+    }}
+      onTouchStart={e => e.currentTarget.style.transform='scale(0.985)'}
+      onTouchEnd={e => e.currentTarget.style.transform='scale(1)'}
+    >
+      <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:10}}>
+        <div style={{flex:1, minWidth:0, marginRight:8}}>
+          <p style={{fontSize:12, fontWeight:600, color: STAGES[lot.stage].color, letterSpacing:'0.03em', textTransform:'uppercase', marginBottom:4}}>
+            {STAGE_LABELS[lot.stage]}
+          </p>
+          <p style={{fontSize:16, fontWeight:600, color:'#1A1A18', marginBottom:3}}>{lot.name}</p>
+          <p style={{fontSize:13, color:'#555550'}}>{SEASON_LABEL[alert.season]} · {alert.maxDays} días estimados</p>
+        </div>
+        <div style={{
+          background: accentBg, color: accentColor,
+          fontSize:13, fontWeight:700,
+          padding:'6px 12px', borderRadius:20, flexShrink:0, textAlign:'center'
+        }}>
+          {isOverdue
+            ? `${Math.abs(alert.remaining)}d atrasado`
+            : isWarning
+            ? `Vence en ${alert.remaining}d`
+            : `${alert.remaining}d restantes`}
+        </div>
+      </div>
+
+      <div style={{marginBottom:8}}>
+        <div style={{height:5, background:'#F0F0EA', borderRadius:3, overflow:'hidden'}}>
+          <div style={{
+            height:'100%', borderRadius:3,
+            width:`${progressPct}%`,
+            background: isOverdue ? '#E05C3A' : isWarning ? '#E07B2A' : '#276F50',
+            transition:'width 0.3s'
+          }} />
+        </div>
+      </div>
+
+      <div style={{display:'flex', justifyContent:'space-between', paddingTop:8, borderTop:'0.5px solid #F0F0EA'}}>
+        <span style={{fontSize:13, color:'#555550', fontFamily:'DM Mono, monospace'}}>Día {alert.days} de {alert.maxDays}</span>
+        <span style={{fontSize:13, color:'#555550', fontFamily:'DM Mono, monospace'}}>{(lot.currentQuantity ?? toPlants(lot.quantity)).toLocaleString()} plantas</span>
+      </div>
+    </div>
+  );
+}
+
+function HistorialPlaceholder() {
+  return (
+    <div style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:32, textAlign:'center'}}>
+      <div style={{width:64, height:64, borderRadius:18, background:'#EEEAF7', display:'flex', alignItems:'center', justifyContent:'center', marginBottom:20}}>
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#6B3FA0" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      </div>
+      <p style={{fontSize:17, fontWeight:600, color:'#1A1A18', marginBottom:8}}>Historial y análisis</p>
+      <p style={{fontSize:14, color:'#555550', lineHeight:1.7, marginBottom:20}}>Acá vas a poder ver ciclos completos,<br/>tasas de merma por etapa y tendencias<br/>de producción a lo largo del tiempo.</p>
+      <p style={{fontSize:13, color:'#888884', lineHeight:1.6}}>Disponible una vez que tengas<br/>varios ciclos completos registrados.</p>
+      <div style={{marginTop:20, fontSize:12, color:'#888884', background:'#F2F2EC', padding:'8px 16px', borderRadius:20, fontWeight:500}}>Próximamente</div>
+    </div>
+  );
+}
+
+// ── NAV BAR ────────────────────────────────────────────
+const NAV = [
+  { id:'lotes',    label:'Lotes',    icon: LotesIcon },
+  { id:'nuevo',    label:'Nuevo',    icon: NuevoIcon },
+  { id:'alertas',  label:'Alertas',  icon: AlertasIcon },
+  { id:'historial',label:'Historial',icon: HistorialIcon },
+];
+
+function NavBar({ active, onChange, alertCount }) {
+  return (
+    <div style={{
+      display:'flex', background:'#fff',
+      borderTop:'0.5px solid #E8E8E2',
+      paddingBottom:'env(safe-area-inset-bottom, 0px)',
+    }}>
+      {NAV.map(({ id, label, icon: Icon }) => (
+        <button
+          key={id}
+          onClick={() => onChange(id)}
+          style={{
+            flex:1, display:'flex', flexDirection:'column', alignItems:'center',
+            justifyContent:'center', padding:'10px 0 8px',
+            background:'none', border:'none', cursor:'pointer',
+            color: active === id ? '#276F50' : '#B0B0A8',
+            transition:'color 0.15s', position:'relative'
+          }}
+        >
+          <Icon active={active === id} />
+          {id === 'alertas' && alertCount > 0 && (
+            <div style={{
+              position:'absolute', top:8, left:'50%', transform:'translateX(4px)',
+              width:16, height:16, borderRadius:8, background:'#E05C3A',
+              display:'flex', alignItems:'center', justifyContent:'center',
+              fontSize:9, fontWeight:700, color:'#fff'
+            }}>{alertCount}</div>
+          )}
+          <span style={{fontSize:10, fontWeight: active === id ? 600 : 400, marginTop:3}}>{label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function LotesIcon({ active }) {
+  return <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active?2.2:1.8} strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>;
+}
+function NuevoIcon({ active }) {
+  return <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active?2.2:1.8} strokeLinecap="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>;
+}
+function AlertasIcon({ active }) {
+  return <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active?2.2:1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>;
+}
+function HistorialIcon({ active }) {
+  return <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active?2.2:1.8} strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>;
+}
+
+// ── APP ────────────────────────────────────────────────
+function App() {
+  const [screen, setScreen] = useState('lotes');
+  const [prevScreen, setPrevScreen] = useState(null);
+  const [lots, setLots] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedLot, setSelectedLot] = useState(null);
+
+  const fetchLots = useCallback(async () => {
+    try {
+      const data = await fsDb.list('lotes');
+      data.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+      setLots(data);
+    } catch(e) { console.error(e); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    fetchLots();
+    const interval = setInterval(fetchLots, 15000);
+    return () => clearInterval(interval);
+  }, [fetchLots]);
+
+  const saveLot = useCallback(async (lot) => {
+    const { id, ...data } = lot;
+    setLots(ls => [lot, ...ls.filter(l => l.id !== id)]);
+    await fsDb.set('lotes', id, lot);
+  }, []);
+
+  const updateLot = useCallback(async (updated) => {
+    setLots(ls => ls.map(l => l.id === updated.id ? updated : l));
+    await fsDb.set('lotes', updated.id, updated);
+  }, []);
+
+  const deleteLot = useCallback(async (id) => {
+    setLots(ls => ls.filter(l => l.id !== id));
+    setSelectedLot(null);
+    await fsDb.del('lotes', id);
+  }, []);
+
+  const handleNav = (id) => {
+    setSelectedLot(null);
+    setPrevScreen(null);
+    setScreen(id);
+  };
+
+  const alertCount = lots.filter(l => {
+    const a = getLotAlert(l);
+    return a && a.status !== 'ok';
+  }).length;
+
+  const renderMain = () => {
+    if (screen === 'lotes') {
+      if (selectedLot) {
+        const lot = lots.find(l => l.id === selectedLot);
+        const backLabel = prevScreen === 'alertas' ? 'Volver a Alertas' : 'Volver';
+        const handleBack = () => {
+          setSelectedLot(null);
+          if (prevScreen) { setScreen(prevScreen); setPrevScreen(null); }
+        };
+        return lot ? <DetalleLote lot={lot} onBack={handleBack} backLabel={backLabel} onUpdate={updateLot} onDelete={deleteLot} /> : null;
+      }
+      return <LotesScreen lots={lots} onSelect={lot => setSelectedLot(lot.id)} />;
+    }
+    if (screen === 'nuevo') return <NuevoScreen onSave={saveLot} goToLotes={() => setScreen('lotes')} />;
+    if (screen === 'alertas') return <AlertasScreen lots={lots} onSelect={lot => {
+      setPrevScreen('alertas');
+      setSelectedLot(lot.id);
+      setScreen('lotes');
+    }} />;
+    if (screen === 'historial') return <HistorialPlaceholder />;
+  };
+
+  const screenTitle = {
+    lotes: selectedLot ? null : 'Mis lotes',
+    nuevo: 'Nuevo lote',
+    alertas: 'Alertas',
+    historial: 'Historial',
+  };
+
+  if (loading) {
+    return (
+      <div style={{height:'100%', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', background:'#F7F7F4', gap:16}}>
+        <div style={{width:56, height:56, borderRadius:16, background:'#E2F3EC', display:'flex', alignItems:'center', justifyContent:'center'}}>
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#276F50" strokeWidth="2" strokeLinecap="round"><path d="M12 2a9 9 0 0 1 9 9c0 4.97-9 13-9 13S3 15.97 3 11a9 9 0 0 1 9-9z"/><circle cx="12" cy="11" r="2.5"/></svg>
+        </div>
+        <p style={{fontSize:16, fontWeight:600, color:'#1A1A18'}}>App Agrícola Nalhuitad</p>
+        <p style={{fontSize:13, color:'#888884'}}>Conectando con la nube...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      height:'100%', display:'flex', flexDirection:'column',
+      background:'#F7F7F4', maxWidth:480, margin:'0 auto',
+      position:'relative'
+    }}>
+      {!selectedLot && (
+        <div style={{
+          padding:'48px 20px 16px',
+          background:'#F7F7F4',
+          borderBottom:'0.5px solid #EAEAE4',
+        }}>
+          <p style={{
+            fontSize: screen === 'lotes' ? 26 : 22,
+            fontWeight:600, color:'#1A1A18', lineHeight:1.2
+          }}>
+            {screenTitle[screen]}
+          </p>
+          {screen === 'lotes' && lots.filter(l => l.stage !== 'cosecha').length > 0 && (
+            <p style={{fontSize:13, color:'#555550', marginTop:4}}>
+              {lots.filter(l => l.stage !== 'cosecha').length} lote{lots.filter(l=>l.stage!=='cosecha').length!==1?'s':''} activo{lots.filter(l=>l.stage!=='cosecha').length!==1?'s':''}
+            </p>
+          )}
+        </div>
+      )}
+
+      <div style={{flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minHeight:0}}>
+        {renderMain()}
+      </div>
+
+      <NavBar active={screen} onChange={handleNav} alertCount={alertCount} />
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
