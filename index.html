@@ -15,145 +15,8 @@
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
-<script>
-// ── FIRESTORE REST API ────────────────────────────────
-const FS_PROJECT = 'nalhuitad-d6758';
-const FS_KEY     = 'AIzaSyCHlsJDU0o7JsOvY4mgr5lVhiDOEok3C5w';
-const FS_BASE    = `https://firestore.googleapis.com/v1/projects/${FS_PROJECT}/databases/(default)/documents`;
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
-function toFSValue(v) {
-  if (v === null || v === undefined) return { nullValue: null };
-  if (typeof v === 'boolean') return { booleanValue: v };
-  if (typeof v === 'number') return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
-  if (typeof v === 'string') return { stringValue: v };
-  if (Array.isArray(v)) return { arrayValue: { values: v.map(toFSValue) } };
-  if (typeof v === 'object') return { mapValue: { fields: toFSFields(v) } };
-}
-function toFSFields(obj) {
-  const f = {};
-  for (const [k, v] of Object.entries(obj)) f[k] = toFSValue(v);
-  return f;
-}
-function fromFSValue(v) {
-  if (!v) return null;
-  if ('stringValue'  in v) return v.stringValue;
-  if ('integerValue' in v) return parseInt(v.integerValue);
-  if ('doubleValue'  in v) return v.doubleValue;
-  if ('booleanValue' in v) return v.booleanValue;
-  if ('nullValue'    in v) return null;
-  if ('arrayValue'   in v) return (v.arrayValue.values || []).map(fromFSValue);
-  if ('mapValue'     in v) return fromFSDoc({ fields: v.mapValue.fields || {} });
-  return null;
-}
-function fromFSDoc(doc) {
-  const obj = {};
-  for (const [k, v] of Object.entries(doc.fields || {})) obj[k] = fromFSValue(v);
-  if (doc.name) obj.id = doc.name.split('/').pop();
-  return obj;
-}
-
-const AUTH_EXPIRED_ERROR = 'AUTH_EXPIRED';
-
-const fsDb = {
-  getToken() {
-    try {
-      const s = JSON.parse(localStorage.getItem('hidro_auth_v1') || 'null');
-      return s?.idToken || null;
-    } catch { return null; }
-  },
-  headers() {
-    const token = this.getToken();
-    const h = { 'Content-Type': 'application/json' };
-    if (token) h['Authorization'] = `Bearer ${token}`;
-    return h;
-  },
-  checkAuth(r) {
-    if (r.status === 401 || r.status === 403) {
-      fsAuth.clear();
-      throw new Error(AUTH_EXPIRED_ERROR);
-    }
-  },
-  async list(col) {
-    const r = await fetch(`${FS_BASE}/${col}?key=${FS_KEY}`, { headers: this.headers() });
-    this.checkAuth(r);
-    const j = await r.json();
-    return (j.documents || []).map(fromFSDoc);
-  },
-  async set(col, id, data) {
-    const { id: _id, ...rest } = data;
-    const body = JSON.stringify({ fields: toFSFields(rest) });
-    const r = await fetch(`${FS_BASE}/${col}/${id}?key=${FS_KEY}`, {
-      method: 'PATCH', headers: this.headers(), body
-    });
-    this.checkAuth(r);
-  },
-  async del(col, id) {
-    const r = await fetch(`${FS_BASE}/${col}/${id}?key=${FS_KEY}`, {
-      method: 'DELETE', headers: this.headers()
-    });
-    this.checkAuth(r);
-  }
-};
-
-// ── FIREBASE AUTH REST API ────────────────────────────
-const AUTH_KEY = 'AIzaSyC246p0MSQkLZwXXDj8ibJox940k6HHG5o';
-const AUTH_URL = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${AUTH_KEY}`;
-const AUTH_STORE_KEY = 'hidro_auth_v1';
-const MAX_ATTEMPTS = 5;
-const LOCKOUT_MS = 15 * 60 * 1000;
-
-const fsAuth = {
-  async signIn(email, password) {
-    const r = await fetch(AUTH_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, returnSecureToken: true })
-    });
-    const j = await r.json();
-    if (!r.ok) {
-      const msg = j?.error?.message || 'ERROR';
-      throw new Error(msg);
-    }
-    return { idToken: j.idToken, email: j.email, displayName: j.displayName || email.split('@')[0] };
-  },
-  save(session) {
-    try { localStorage.setItem(AUTH_STORE_KEY, JSON.stringify({ ...session, ts: Date.now() })); } catch {}
-  },
-  load() {
-    try {
-      const s = JSON.parse(localStorage.getItem(AUTH_STORE_KEY) || 'null');
-      if (!s) return null;
-      // Sesión válida por 7 días
-      if (Date.now() - s.ts > 7 * 24 * 60 * 60 * 1000) { this.clear(); return null; }
-      return s;
-    } catch { return null; }
-  },
-  clear() { try { localStorage.removeItem(AUTH_STORE_KEY); } catch {} },
-  // Control de intentos fallidos
-  getAttempts() {
-    try { return JSON.parse(localStorage.getItem('hidro_attempts') || '{"count":0,"ts":0}'); } catch { return {count:0,ts:0}; }
-  },
-  addAttempt() {
-    const a = this.getAttempts();
-    const newA = { count: a.count + 1, ts: Date.now() };
-    try { localStorage.setItem('hidro_attempts', JSON.stringify(newA)); } catch {}
-    return newA;
-  },
-  clearAttempts() { try { localStorage.removeItem('hidro_attempts'); } catch {} },
-  isLocked() {
-    const a = this.getAttempts();
-    if (a.count < MAX_ATTEMPTS) return false;
-    if (Date.now() - a.ts < LOCKOUT_MS) return true;
-    this.clearAttempts();
-    return false;
-  },
-  lockRemaining() {
-    const a = this.getAttempts();
-    return Math.ceil((LOCKOUT_MS - (Date.now() - a.ts)) / 60000);
-  }
-};
-</script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body,#root{height:100%;width:100%;overflow:hidden}
@@ -228,6 +91,181 @@ body.dark .dm-toggle-thumb{background:#E8E8E4 !important}
 <body>
 <div id="root"></div>
 <script type="text/babel">
+
+// ── FIRESTORE REST API ────────────────────────────────
+const FS_PROJECT = 'nalhuitad-d6758';
+const FS_KEY     = 'AIzaSyCHlsJDU0o7JsOvY4mgr5lVhiDOEok3C5w';
+const FS_BASE    = `https://firestore.googleapis.com/v1/projects/${FS_PROJECT}/databases/(default)/documents`;
+
+function toFSValue(v) {
+  if (v === null || v === undefined) return { nullValue: null };
+  if (typeof v === 'boolean') return { booleanValue: v };
+  if (typeof v === 'number') return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
+  if (typeof v === 'string') return { stringValue: v };
+  if (Array.isArray(v)) return { arrayValue: { values: v.map(toFSValue) } };
+  if (typeof v === 'object') return { mapValue: { fields: toFSFields(v) } };
+}
+function toFSFields(obj) {
+  const f = {};
+  for (const [k, v] of Object.entries(obj)) f[k] = toFSValue(v);
+  return f;
+}
+function fromFSValue(v) {
+  if (!v) return null;
+  if ('stringValue'  in v) return v.stringValue;
+  if ('integerValue' in v) return parseInt(v.integerValue);
+  if ('doubleValue'  in v) return v.doubleValue;
+  if ('booleanValue' in v) return v.booleanValue;
+  if ('nullValue'    in v) return null;
+  if ('arrayValue'   in v) return (v.arrayValue.values || []).map(fromFSValue);
+  if ('mapValue'     in v) return fromFSDoc({ fields: v.mapValue.fields || {} });
+  return null;
+}
+function fromFSDoc(doc) {
+  const obj = {};
+  for (const [k, v] of Object.entries(doc.fields || {})) obj[k] = fromFSValue(v);
+  if (doc.name) obj.id = doc.name.split('/').pop();
+  return obj;
+}
+
+const AUTH_EXPIRED_ERROR = 'AUTH_EXPIRED';
+
+const fsDb = {
+  getToken() {
+    try {
+      const s = JSON.parse(localStorage.getItem('hidro_auth_v1') || 'null');
+      return s?.idToken || null;
+    } catch { return null; }
+  },
+  headers() {
+    const token = this.getToken();
+    const h = { 'Content-Type': 'application/json' };
+    if (token) h['Authorization'] = `Bearer ${token}`;
+    return h;
+  },
+  async checkAuth(r) {
+    if (r.status === 401 || r.status === 403) {
+      // Intentar renovar token antes de cerrar sesión
+      const newToken = await fsAuth.refreshToken();
+      if (!newToken) {
+        fsAuth.clear();
+        throw new Error(AUTH_EXPIRED_ERROR);
+      }
+      // Token renovado — reintentar la operación
+      throw new Error('RETRY');
+    }
+  },
+  async list(col) {
+    let r = await fetch(`${FS_BASE}/${col}?key=${FS_KEY}`, { headers: this.headers() });
+    await this.checkAuth(r);
+    if (r.status === 401 || r.status === 403) {
+      r = await fetch(`${FS_BASE}/${col}?key=${FS_KEY}`, { headers: this.headers() });
+    }
+    const j = await r.json();
+    return (j.documents || []).map(fromFSDoc);
+  },
+  async set(col, id, data) {
+    const { id: _id, ...rest } = data;
+    const body = JSON.stringify({ fields: toFSFields(rest) });
+    let r = await fetch(`${FS_BASE}/${col}/${id}?key=${FS_KEY}`, {
+      method: 'PATCH', headers: this.headers(), body
+    });
+    await this.checkAuth(r);
+    if (r.status === 401 || r.status === 403) {
+      r = await fetch(`${FS_BASE}/${col}/${id}?key=${FS_KEY}`, {
+        method: 'PATCH', headers: this.headers(), body
+      });
+    }
+  },
+  async del(col, id) {
+    let r = await fetch(`${FS_BASE}/${col}/${id}?key=${FS_KEY}`, {
+      method: 'DELETE', headers: this.headers()
+    });
+    await this.checkAuth(r);
+  }
+};
+
+// ── FIREBASE AUTH REST API ────────────────────────────
+const AUTH_KEY = 'AIzaSyC246p0MSQkLZwXXDj8ibJox940k6HHG5o';
+const AUTH_URL     = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${AUTH_KEY}`;
+const REFRESH_URL  = `https://securetoken.googleapis.com/v1/token?key=${AUTH_KEY}`;
+const AUTH_STORE_KEY = 'hidro_auth_v1';
+const MAX_ATTEMPTS = 5;
+const LOCKOUT_MS = 15 * 60 * 1000;
+
+const fsAuth = {
+  async signIn(email, password) {
+    const r = await fetch(AUTH_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, returnSecureToken: true })
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j?.error?.message || 'ERROR');
+    return {
+      idToken: j.idToken,
+      refreshToken: j.refreshToken,
+      email: j.email,
+      expiresAt: Date.now() + (parseInt(j.expiresIn) * 1000),
+    };
+  },
+  async refreshToken() {
+    try {
+      const s = this.load();
+      if (!s?.refreshToken) return null;
+      const r = await fetch(REFRESH_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `grant_type=refresh_token&refresh_token=${s.refreshToken}`
+      });
+      const j = await r.json();
+      if (!r.ok) return null;
+      const updated = {
+        ...s,
+        idToken: j.id_token,
+        refreshToken: j.refresh_token,
+        expiresAt: Date.now() + (parseInt(j.expires_in) * 1000),
+      };
+      this.save(updated);
+      return updated.idToken;
+    } catch { return null; }
+  },
+  save(session) {
+    try { localStorage.setItem(AUTH_STORE_KEY, JSON.stringify({ ...session, ts: Date.now() })); } catch {}
+  },
+  load() {
+    try {
+      const s = JSON.parse(localStorage.getItem(AUTH_STORE_KEY) || 'null');
+      if (!s) return null;
+      if (Date.now() - s.ts > 30 * 24 * 60 * 60 * 1000) { this.clear(); return null; }
+      return s;
+    } catch { return null; }
+  },
+  clear() { try { localStorage.removeItem(AUTH_STORE_KEY); } catch {} },
+  getAttempts() {
+    try { return JSON.parse(localStorage.getItem('hidro_attempts') || '{"count":0,"ts":0}'); } catch { return {count:0,ts:0}; }
+  },
+  addAttempt() {
+    const a = this.getAttempts();
+    const newA = { count: a.count + 1, ts: Date.now() };
+    try { localStorage.setItem('hidro_attempts', JSON.stringify(newA)); } catch {}
+    return newA;
+  },
+  clearAttempts() { try { localStorage.removeItem('hidro_attempts'); } catch {} },
+  isLocked() {
+    const a = this.getAttempts();
+    if (a.count < MAX_ATTEMPTS) return false;
+    if (Date.now() - a.ts < LOCKOUT_MS) return true;
+    this.clearAttempts();
+    return false;
+  },
+  lockRemaining() {
+    const a = this.getAttempts();
+    return Math.ceil((LOCKOUT_MS - (Date.now() - a.ts)) / 60000);
+  }
+};
+
+
 const { useState, useEffect, useCallback } = React;
 
 // Helper para leer dark mode en cualquier componente
@@ -1097,6 +1135,96 @@ function MermaItem({ label, value, color }) {
   );
 }
 
+
+// ── MODAL TRANSPLANTE PARCIAL ─────────────────────────
+function TransplanteModal({ lot, onClose, onConfirm, esTotal: esTotalProp }) {
+  const currentQty = lot.currentQuantity ?? toPlants(lot.quantity);
+  const yaTransplantadas = (lot.transplantes || []).reduce((a,t) => a+(t.transplantadas||0), 0);
+  const esTotal = esTotalProp === true;
+  const [date, setDate] = useState(todayISO());
+  const [transplantadas, setTransplantadas] = useState(esTotal ? String(Math.max(0, currentQty - yaTransplantadas)) : '');
+  const [desechadas, setDesechadas] = useState('');
+  const [notas, setNotas] = useState('');
+  const [errors, setErrors] = useState({});
+  const [confirming, setConfirming] = useState(false);
+  const dm = document.body.classList.contains('dark');
+  const totalT = parseInt(transplantadas) || 0;
+  const totalD = parseInt(desechadas) || 0;
+  const disponibles = currentQty - yaTransplantadas;
+  const quedan = disponibles - totalT - totalD;
+  const completaTotal = esTotal || (totalT + totalD >= disponibles);
+
+  const validate = () => {
+    const e = {};
+    if (!transplantadas || isNaN(transplantadas) || totalT <= 0) e.transplantadas = 'Ingresá una cantidad válida';
+    if (totalT + totalD > disponibles) e.transplantadas = `No puede superar las ${disponibles.toLocaleString()} disponibles`;
+    return e;
+  };
+
+  const handleConfirm = () => {
+    const e = validate();
+    if (Object.keys(e).length) { setErrors(e); return; }
+    setConfirming(true);
+  };
+
+  return (
+    <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.55)', display:'flex', alignItems:'flex-end', justifyContent:'center', zIndex:100}}
+      onClick={e => { if(e.target===e.currentTarget) onClose(); }}>
+      <div className="modal-in" style={{background: dm ? '#1E1E1C' : '#F7F7F4', borderRadius:'20px 20px 0 0', width:'100%', maxWidth:480, padding:'20px 20px 36px', maxHeight:'90vh', overflowY:'auto'}}>
+        <div style={{width:36, height:4, background: dm ? '#444440' : '#D8D8D2', borderRadius:2, margin:'0 auto 20px'}} />
+        <p style={{fontSize:17, fontWeight:600, color: dm ? '#E8E8E4' : '#1A1A18', marginBottom:4}}>
+          {esTotal ? 'Transplante total — pasar a Raleo' : 'Registrar transplante parcial'}
+        </p>
+        <p style={{fontSize:13, color:'#888884', marginBottom:20}}>
+          Disponibles: <strong style={{color: dm ? '#E8E8E4' : '#1A1A18'}}>{disponibles.toLocaleString()} plantas</strong>
+          {yaTransplantadas > 0 && <span style={{color:'#888884'}}> · {yaTransplantadas.toLocaleString()} ya transplantadas</span>}
+        </p>
+        <Field label="Fecha del transplante">
+          <input id="tp-fecha" name="tp-fecha" type="date" value={date} onChange={e => setDate(e.target.value)} style={inputStyle()} />
+        </Field>
+        <Field label="Plantas transplantadas" error={errors.transplantadas}>
+          <input id="tp-plantas" name="tp-plantas" type="number" inputMode="numeric" value={transplantadas}
+            onChange={e => { setTransplantadas(e.target.value); setErrors({}); }}
+            placeholder={`Máx. ${disponibles.toLocaleString()}`} style={inputStyle(errors.transplantadas)} />
+        </Field>
+        <Field label="Plantas desechadas (merma)">
+          <input id="tp-desechadas" name="tp-desechadas" type="number" inputMode="numeric" value={desechadas}
+            onChange={e => setDesechadas(e.target.value)} placeholder="0" style={inputStyle()} />
+        </Field>
+        {totalT > 0 && (
+          <div style={{background: dm ? '#2A2A28' : '#fff', border:`0.5px solid ${dm ? '#444440' : '#E0E0DA'}`, borderRadius:12, padding:'12px 16px', marginBottom:16, display:'flex', gap:0}}>
+            <MermaItem label="Transplantadas" value={totalT.toLocaleString()} color={STAGES.transplante.color} />
+            {totalD > 0 && <MermaItem label="Desechadas" value={totalD.toLocaleString()} color="#E07B2A" />}
+            <MermaItem label="Quedan" value={Math.max(0, quedan).toLocaleString()} color={quedan <= 0 ? '#6B3FA0' : dm ? '#E8E8E4' : '#1A1A18'} />
+          </div>
+        )}
+        {completaTotal && totalT > 0 && (
+          <div style={{background:'#EEE8F7', borderRadius:8, padding:'8px 12px', marginBottom:16, display:'flex', alignItems:'center', gap:8}}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6B3FA0" strokeWidth="2" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+            <span style={{fontSize:13, color:'#6B3FA0', fontWeight:500}}>Transplante completo → el lote pasa a Raleo</span>
+          </div>
+        )}
+        <Field label="Notas (opcional)">
+          <textarea id="tp-notas" name="tp-notas" value={notas} onChange={e => setNotas(e.target.value)}
+            rows={2} placeholder="Ej: piscina norte, tubos 1 al 5..." style={{...inputStyle(), resize:'none', lineHeight:1.6}} />
+        </Field>
+        {confirming ? (
+          <ConfirmBar
+            message={'Registrar ' + totalT.toLocaleString() + ' plantas transplantadas' + (totalD > 0 ? ' y ' + totalD.toLocaleString() + ' desechadas' : '') + '.' + (completaTotal ? ' El lote avanzará a Raleo.' : '')}
+            confirmLabel={completaTotal ? 'Sí, completar transplante' : 'Sí, registrar'}
+            onConfirm={() => onConfirm({ date, transplantadas: totalT, desechadas: totalD, notas: notas.trim(), esTotal: completaTotal })}
+            onCancel={() => setConfirming(false)}
+          />
+        ) : (
+          <button onClick={handleConfirm} style={{width:'100%', padding:'14px 0', borderRadius:12, border:'none', background: STAGES.transplante.color, color:'#fff', fontSize:15, fontWeight:600, cursor:'pointer', marginTop:4}}>
+            {esTotal ? 'Confirmar transplante total' : 'Registrar transplante'}
+          </button>
+        )}
+        <button onClick={onClose} style={{width:'100%', padding:'12px 0', borderRadius:12, border:'none', background:'none', color:'#888884', fontSize:14, cursor:'pointer', marginTop:6}}>Cancelar</button>
+      </div>
+    </div>
+  );
+}
 // ── MODAL COSECHA PARCIAL ─────────────────────────────
 function CosechaModal({ lot, onClose, onConfirm, editData, editMode }) {
   const currentQty = lot.currentQuantity ?? toPlants(lot.quantity);
@@ -1207,7 +1335,7 @@ function CosechaModal({ lot, onClose, onConfirm, editData, editMode }) {
           />
         ) : confirmNew ? (
           <ConfirmBar
-            message={`Registrar ${totalSale.toLocaleString()} lechugas cosechadas${totalDiscard > 0 ? ` y ${totalDiscard.toLocaleString()} descartadas` : ''}.`}
+            message={'Registrar ' + totalSale.toLocaleString() + ' lechugas cosechadas' + (totalDiscard > 0 ? ' y ' + totalDiscard.toLocaleString() + ' descartadas' : '') + '.'}
             confirmLabel="Sí, registrar"
             onConfirm={() => onConfirm({ date, cosechadas: totalSale, descartadas: totalDiscard, notes: notes.trim() })}
             onCancel={() => setConfirmNew(false)}
@@ -1237,6 +1365,7 @@ function DetalleLote({ lot, onBack, backLabel = 'Volver', onUpdate, onDelete }) 
   const [editing, setEditing] = useState(false);
   const [showAvanzar, setShowAvanzar] = useState(false);
   const [showCosecha, setShowCosecha] = useState(false);
+  const [showTransplante, setShowTransplante] = useState(false);
   const [editCosechaIdx, setEditCosechaIdx] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -1280,6 +1409,27 @@ function DetalleLote({ lot, onBack, backLabel = 'Volver', onUpdate, onDelete }) 
     };
     onUpdate(updated);
     setEditCosechaIdx(null);
+  };
+
+  const handleTransplante = ({ date, transplantadas, desechadas, notas, esTotal }) => {
+    const registro = { date, transplantadas, desechadas, notas };
+    const newTransplantes = [...(lot.transplantes || []), registro];
+    const totalTransplantadas = newTransplantes.reduce((a, t) => a + (t.transplantadas || 0), 0);
+    const totalDesechadas = newTransplantes.reduce((a, t) => a + (t.desechadas || 0), 0);
+    const plantasOriginales = lot.currentQuantity ?? toPlants(lot.quantity);
+    const newQty = Math.max(0, plantasOriginales - totalDesechadas);
+    const agotado = esTotal || totalTransplantadas >= newQty;
+    const updated = {
+      ...lot,
+      transplantes: newTransplantes,
+      currentQuantity: newQty,
+      stage: agotado ? 'raleo' : lot.stage,
+      stageHistory: agotado
+        ? [...lot.stageHistory, { stage:'raleo', date, quantity: newQty, notes: notas || 'Transplante completado' }]
+        : lot.stageHistory,
+    };
+    onUpdate(updated);
+    setShowTransplante(false);
   };
 
   const handleCosecha = ({ date, cosechadas, descartadas, notes: cosNotes }) => {
@@ -1419,6 +1569,7 @@ function DetalleLote({ lot, onBack, backLabel = 'Volver', onUpdate, onDelete }) 
     <>
     {showAvanzar && <AvanzarModal lot={lot} onClose={() => setShowAvanzar(false)} onConfirm={handleAvanzar} />}
     {showCosecha && <CosechaModal lot={lot} onClose={() => setShowCosecha(false)} onConfirm={handleCosecha} />}
+    {showTransplante && <TransplanteModal lot={lot} onClose={() => setShowTransplante(false)} onConfirm={handleTransplante} esTotal={showTransplante === 'total'} />}
     {editCosechaIdx !== null && lot.cosechas?.[editCosechaIdx] && (
       <CosechaModal
         lot={lot}
@@ -1551,6 +1702,39 @@ function DetalleLote({ lot, onBack, backLabel = 'Volver', onUpdate, onDelete }) 
         </>
       )}
 
+      {lot.transplantes && lot.transplantes.length > 0 && (
+        <>
+          <p style={{fontSize:12, fontWeight:600, letterSpacing:'0.06em', color:dmText2, textTransform:'uppercase', margin:'20px 0 10px'}}>
+            Transplantes registrados · {lot.transplantes.length}
+          </p>
+          <div style={{background: dmCard, border:`0.5px solid ${dmBorder}`, borderRadius:14, overflow:'hidden', marginBottom:24}}>
+            {lot.transplantes.map((t, i) => (
+              <div key={i} style={{
+                display:'flex', justifyContent:'space-between', alignItems:'center',
+                padding:'14px 16px',
+                borderBottom: i < lot.transplantes.length-1 ? `0.5px solid ${dmBorder2}` : 'none'
+              }}>
+                <div style={{display:'flex', alignItems:'center', gap:10, flex:1}}>
+                  <div style={{width:9, height:9, borderRadius:5, background: STAGES.transplante.color, flexShrink:0}} />
+                  <div>
+                    <span style={{fontSize:14, fontWeight:500, color:dmText, display:'block'}}>{(t.transplantadas||0).toLocaleString()} transplantadas</span>
+                    {t.desechadas > 0 && <span style={{fontSize:12, color:'#E07B2A', display:'block', marginTop:2}}>{t.desechadas.toLocaleString()} desechadas</span>}
+                    {t.notas && <span style={{fontSize:12, color:dmText2, display:'block', marginTop:2}}>{t.notas}</span>}
+                  </div>
+                </div>
+                <p style={{fontSize:13, color:dmText, fontFamily:'DM Mono, monospace'}}>{formatDate(t.date)}</p>
+              </div>
+            ))}
+            <div style={{padding:'12px 16px', background:dmBg2, display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+              <span style={{fontSize:13, color:dmText2, fontWeight:500}}>Total transplantado</span>
+              <span style={{fontSize:14, fontWeight:600, color: STAGES.transplante.color, fontFamily:'DM Mono, monospace'}}>
+                {(lot.transplantes.reduce((a,t) => a+(t.transplantadas||0), 0)).toLocaleString()} plantas
+              </span>
+            </div>
+          </div>
+        </>
+      )}
+
       {lot.stage === 'raleo' && (
         <button onClick={() => setShowCosecha(true)} style={{
           width:'100%', padding:'14px 0', borderRadius:12, border:'none',
@@ -1563,7 +1747,31 @@ function DetalleLote({ lot, onBack, backLabel = 'Volver', onUpdate, onDelete }) 
         </button>
       )}
 
-      {NEXT_STAGE[lot.stage] && (
+      {lot.stage === 'transplante' && (
+        <>
+          <button onClick={() => setShowTransplante(true)} style={{
+            width:'100%', padding:'14px 0', borderRadius:12, border:'none',
+            background: STAGES.transplante.color, color:'#fff', fontSize:15, fontWeight:600,
+            cursor:'pointer', display:'flex', alignItems:'center',
+            justifyContent:'center', gap:8, marginBottom:10
+          }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14M5 12l7-7 7 7"/></svg>
+            Registrar transplante parcial
+          </button>
+          <button onClick={() => setShowTransplante('total')} style={{
+            width:'100%', padding:'14px 0', borderRadius:12,
+            border:`0.5px solid ${STAGES.transplante.color}`,
+            background:'none', color: STAGES.transplante.color, fontSize:15, fontWeight:600,
+            cursor:'pointer', display:'flex', alignItems:'center',
+            justifyContent:'center', gap:8, marginBottom:12
+          }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+            Transplante total — pasar a Raleo
+          </button>
+        </>
+      )}
+
+      {lot.stage !== 'transplante' && NEXT_STAGE[lot.stage] && (
         <button onClick={() => setShowAvanzar(true)} style={{
           width:'100%', padding:'14px 0', borderRadius:12, border:'none',
           background: STAGES[NEXT_STAGE[lot.stage]].color,
@@ -2462,7 +2670,7 @@ function LoginScreen({ onLogin }) {
       if (attempt.count >= MAX_ATTEMPTS) {
         setError(`Cuenta bloqueada por ${fsAuth.lockRemaining()} minuto${fsAuth.lockRemaining()!==1?'s':''}. Intentá más tarde.`);
       } else if (e.message.includes('EMAIL_NOT_FOUND') || e.message.includes('INVALID_PASSWORD') || e.message.includes('INVALID_LOGIN_CREDENTIALS')) {
-        setError(`Email o contraseña incorrectos.${rem > 0 ? ` ${rem} intento${rem!==1?'s':''} restante${rem!==1?'s':''}.` : ''}`);
+        setError('Email o contraseña incorrectos.' + (rem > 0 ? ' ' + rem + ' intento' + (rem!==1?'s':'') + ' restante' + (rem!==1?'s':'') + '.' : ''));
       } else if (e.message.includes('TOO_MANY_ATTEMPTS')) {
         setError('Demasiados intentos. Esperá unos minutos.');
       } else {
@@ -2622,10 +2830,13 @@ function App() {
 
   useEffect(() => {
     document.body.classList.toggle('dark', darkMode);
+    // Solo actualizamos darkMode — no tocamos plantsPer ni stageDays
     const cfg = loadConfig();
-    cfg.darkMode = darkMode;
-    saveConfig(cfg);
-    // Aplicar días estimados guardados
+    if (cfg.darkMode !== darkMode) {
+      cfg.darkMode = darkMode;
+      saveConfig(cfg);
+    }
+    // Aplicar días estimados guardados al inicio
     Object.assign(STAGE_DAYS, cfg.stageDays);
   }, [darkMode]);
 
