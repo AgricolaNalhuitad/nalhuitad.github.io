@@ -10,11 +10,11 @@
     --bg:#060E14;
     --panel:#0C1820;
     --card:#0F2030;
-    --border:#1A3050;
-    --sep:#142840;
+    --border:#1E3A5A;
+    --sep:#1A3248;
     --text1:#E8F0F8;
-    --text2:#7A9EC0;
-    --text3:#3A5870;
+    --text2:#A8C8E8;
+    --text3:#6A9EC8;
     --green:#2ECC71;
     --green-dim:#1A5C38;
     --amber:#F59E0B;
@@ -36,7 +36,7 @@
   /* ── CARDS ── */
   .pcard{background:var(--panel);padding:12px 14px;flex-shrink:0}
   .pcard.grow{flex:1;overflow:hidden;display:flex;flex-direction:column}
-  .plabel{font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);margin-bottom:6px}
+  .plabel{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text3);margin-bottom:6px}
 
   /* ── SENSOR VALUE ── */
   .sval{font-family:var(--mono);font-size:32px;font-weight:700;line-height:1}
@@ -56,9 +56,9 @@
   .bancada-item{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--sep)}
   .bancada-item:last-child{border-bottom:none}
   .b-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
-  .b-id{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--teal);width:32px;flex-shrink:0}
-  .b-name{font-size:11px;color:var(--text1);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .b-days{font-family:var(--mono);font-size:11px;color:var(--text2);width:44px;text-align:right;flex-shrink:0}
+  .b-id{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--teal);width:34px;flex-shrink:0}
+  .b-name{font-size:12px;color:var(--text1);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}
+  .b-days{font-family:var(--mono);font-size:12px;color:var(--text1);width:44px;text-align:right;flex-shrink:0;font-weight:600}
   .b-isl{font-family:var(--mono);font-size:11px;font-weight:700;width:36px;text-align:right;flex-shrink:0}
 
   /* ── TREND CHART ── */
@@ -75,7 +75,7 @@
   /* ── TOPBAR ELEMENTS ── */
   .tb-logo{font-size:14px;font-weight:700;color:var(--teal);letter-spacing:.05em}
   .tb-sep{width:1px;height:20px;background:var(--border)}
-  .tb-label{font-size:11px;color:var(--text3)}
+  .tb-label{font-size:12px;color:var(--text2);font-weight:500}
   .tb-val{font-size:12px;font-weight:600;color:var(--text1);font-family:var(--mono)}
   .tb-right{margin-left:auto;display:flex;align-items:center;gap:14px}
   .pulse{width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse 2s ease-in-out infinite}
@@ -126,7 +126,7 @@
     <span class="tb-val" id="tb-temp">—</span>
     <div class="tb-right">
       <div class="pulse" id="sync-dot"></div>
-      <span class="tb-label" id="sync-time">Conectando...</span>
+      <span class="tb-label" id="sync-time" style="font-size:12px;color:var(--text2)">Conectando...</span>
       <div class="tb-sep"></div>
       <span class="tb-val" id="tb-clock"></span>
     </div>
@@ -143,7 +143,7 @@
         <div class="plabel">pH · Solución nutritiva</div>
         <div style="display:flex;align-items:baseline;gap:8px">
           <span class="sval dim" id="ph-val">—</span>
-          <span style="font-size:11px;color:var(--text3)">rango 5.5–6.5</span>
+          <span style="font-size:12px;color:var(--text2)">rango 5.5–6.5</span>
         </div>
         <div style="margin-top:6px;height:4px;background:var(--sep);border-radius:2px;overflow:hidden">
           <div id="ph-bar" style="height:100%;border-radius:2px;background:var(--green);width:60%;transition:width .5s"></div>
@@ -154,12 +154,12 @@
         <div class="plabel">EC · Conductividad eléctrica</div>
         <div style="display:flex;align-items:baseline;gap:8px">
           <span class="sval dim" id="ec-val">—</span>
-          <span style="font-size:11px;color:var(--text3)">µS/cm</span>
+          <span style="font-size:12px;color:var(--text2)">µS/cm</span>
         </div>
         <div style="display:flex;align-items:center;gap:6px;margin-top:6px">
-          <span style="font-size:10px;color:var(--text3)">Setpoint</span>
+          <span style="font-size:11px;color:var(--text2)">Setpoint</span>
           <span style="font-size:10px;font-family:var(--mono);color:var(--text2)" id="ec-setpoint">1800 µS/cm</span>
-          <span style="margin-left:auto;font-size:10px;color:var(--text3)" id="ec-delta"></span>
+          <span style="margin-left:auto;font-size:11px;color:var(--text2)" id="ec-delta"></span>
         </div>
       </div>
 
@@ -167,7 +167,7 @@
         <div class="plabel">T° agua</div>
         <div style="display:flex;align-items:baseline;gap:8px">
           <span class="sval dim" id="temp-val">—</span>
-          <span style="font-size:11px;color:var(--text3)">°C · óptimo 18–22°C</span>
+          <span style="font-size:12px;color:var(--text2)">°C · óptimo 18–22°C</span>
         </div>
       </div>
 
@@ -176,13 +176,13 @@
         <div class="plabel">Oxigenación estimada (DO)</div>
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
           <span class="sval dim" id="o2-val">—</span>
-          <span style="font-size:10px;color:var(--text3)" id="o2-unit">mg/L est.</span>
+          <span style="font-size:11px;color:var(--text2)" id="o2-unit">mg/L est.</span>
         </div>
         <div id="o2-alert" style="display:none" class="alert-banner red">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
           <span id="o2-alert-msg">Riesgo de Hipoxia</span>
         </div>
-        <p style="font-size:9px;color:var(--text3);margin-top:6px;line-height:1.4">Estimación basada en temperatura del agua. A 24°C el oxígeno disuelto cae ~8 mg/L (nivel crítico para raíces NFT).</p>
+        <p style="font-size:11px;color:var(--text3);margin-top:6px;line-height:1.4">Estimación basada en temperatura del agua. A 24°C el oxígeno disuelto cae ~8 mg/L (nivel crítico para raíces NFT).</p>
       </div>
     </div>
 
@@ -229,17 +229,17 @@
         <div class="plabel">Nodos LilyGO</div>
         <div class="node-row">
           <div class="node-dot off" id="nd-invb"></div>
-          <span style="font-size:11px;color:var(--text1)">Inv B (NFT)</span>
-          <span style="margin-left:auto;font-size:9px;font-family:var(--mono);color:var(--text3)" id="nd-invb-ts">sin señal</span>
+          <span style="font-size:12px;font-weight:500;color:var(--text1)">Inv B (NFT)</span>
+          <span style="margin-left:auto;font-size:11px;font-family:var(--mono);color:var(--text2)" id="nd-invb-ts">sin señal</span>
         </div>
         <div class="node-row">
           <div class="node-dot off" id="nd-inva"></div>
-          <span style="font-size:11px;color:var(--text1)">Inv A (Float)</span>
-          <span style="margin-left:auto;font-size:9px;font-family:var(--mono);color:var(--text3)" id="nd-inva-ts">sin señal</span>
+          <span style="font-size:12px;font-weight:500;color:var(--text1)">Inv A (Float)</span>
+          <span style="margin-left:auto;font-size:11px;font-family:var(--mono);color:var(--text2)" id="nd-inva-ts">sin señal</span>
         </div>
         <div class="node-row">
           <div class="node-dot off" id="nd-ext"></div>
-          <span style="font-size:11px;color:var(--text1)">Exterior</span>
+          <span style="font-size:12px;font-weight:500;color:var(--text1)">Exterior</span>
           <span style="margin-left:auto;font-size:9px;font-family:var(--mono);color:var(--text3)">—</span>
         </div>
       </div>
@@ -249,15 +249,15 @@
         <div class="plabel">Producción Inv B</div>
         <div style="display:flex;flex-direction:column;gap:4px">
           <div style="display:flex;justify-content:space-between">
-            <span style="font-size:11px;color:var(--text3)">Plantas activas</span>
+            <span style="font-size:12px;color:var(--text2)">Plantas activas</span>
             <span style="font-size:13px;font-weight:700;font-family:var(--mono);color:var(--text1)" id="prod-plantas">—</span>
           </div>
           <div style="display:flex;justify-content:space-between">
-            <span style="font-size:11px;color:var(--text3)">Bancadas en uso</span>
+            <span style="font-size:12px;color:var(--text2)">Bancadas en uso</span>
             <span style="font-size:12px;font-family:var(--mono);color:var(--teal)" id="prod-bancadas">—</span>
           </div>
           <div style="display:flex;justify-content:space-between">
-            <span style="font-size:11px;color:var(--text3)">Próxima cosecha</span>
+            <span style="font-size:12px;color:var(--text2)">Próxima cosecha</span>
             <span style="font-size:12px;font-family:var(--mono);color:var(--amber)" id="prod-cosecha">—</span>
           </div>
         </div>
@@ -298,7 +298,7 @@
       <button onclick="applyCalib()" style="flex:1;padding:9px 0;background:var(--teal);border:none;border-radius:8px;color:#060E14;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--sans)">Aplicar offset</button>
       <button onclick="closeCalibModal()" style="flex:1;padding:9px 0;background:none;border:1px solid var(--border);border-radius:8px;color:var(--text3);font-size:13px;cursor:pointer;font-family:var(--sans)">Cancelar</button>
     </div>
-    <p style="font-size:10px;color:var(--text3);margin-top:10px" id="calib-result"></p>
+    <p style="font-size:11px;color:var(--text2);margin-top:10px" id="calib-result"></p>
   </div>
 </div>
 
