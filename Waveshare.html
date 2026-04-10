@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=1024"/>
+<title>Nalhuitad · Panel NFT Inv B</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#060E14;
+    --panel:#0C1820;
+    --card:#0F2030;
+    --border:#1A3050;
+    --sep:#142840;
+    --text1:#E8F0F8;
+    --text2:#7A9EC0;
+    --text3:#3A5870;
+    --green:#2ECC71;
+    --green-dim:#1A5C38;
+    --amber:#F59E0B;
+    --red:#EF4444;
+    --blue:#3B82F6;
+    --teal:#14B8A6;
+    --purple:#A855F7;
+    --mono:'DM Mono',monospace;
+    --sans:'DM Sans',system-ui,sans-serif;
+  }
+  html,body{width:1024px;height:600px;overflow:hidden;background:var(--bg);font-family:var(--sans);color:var(--text1)}
+
+  /* ── LAYOUT ── */
+  #root{width:1024px;height:600px;display:flex;flex-direction:column}
+  .topbar{height:44px;background:var(--panel);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 16px;gap:16px;flex-shrink:0}
+  .main{flex:1;display:grid;grid-template-columns:260px 1fr 220px;gap:1px;background:var(--border);overflow:hidden}
+  .col{background:var(--bg);display:flex;flex-direction:column;gap:1px;overflow:hidden}
+
+  /* ── CARDS ── */
+  .pcard{background:var(--panel);padding:12px 14px;flex-shrink:0}
+  .pcard.grow{flex:1;overflow:hidden;display:flex;flex-direction:column}
+  .plabel{font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);margin-bottom:6px}
+
+  /* ── SENSOR VALUE ── */
+  .sval{font-family:var(--mono);font-size:32px;font-weight:700;line-height:1}
+  .sval.ok{color:var(--green)}
+  .sval.warn{color:var(--amber)}
+  .sval.crit{color:var(--red);animation:blink 1s ease-in-out infinite}
+  .sval.dim{color:var(--text2)}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.4}}
+
+  /* ── ALERT BANNER ── */
+  .alert-banner{padding:8px 14px;display:flex;align-items:center;gap:10px;font-size:12px;font-weight:600;border-left:3px solid}
+  .alert-banner.red{background:#1A0808;border-color:var(--red);color:var(--red)}
+  .alert-banner.amber{background:#1A1208;border-color:var(--amber);color:var(--amber)}
+  .alert-banner.green{background:#081A10;border-color:var(--green);color:var(--green)}
+
+  /* ── BANCADA GRID ── */
+  .bancada-item{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--sep)}
+  .bancada-item:last-child{border-bottom:none}
+  .b-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+  .b-id{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--teal);width:32px;flex-shrink:0}
+  .b-name{font-size:11px;color:var(--text1);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .b-days{font-family:var(--mono);font-size:11px;color:var(--text2);width:44px;text-align:right;flex-shrink:0}
+  .b-isl{font-family:var(--mono);font-size:11px;font-weight:700;width:36px;text-align:right;flex-shrink:0}
+
+  /* ── TREND CHART ── */
+  .chart-wrap{flex:1;position:relative;min-height:0}
+  canvas{position:absolute;inset:0;width:100%!important;height:100%!important}
+
+  /* ── STATUS NODES ── */
+  .node-row{display:flex;align-items:center;gap:8px;padding:5px 0}
+  .node-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+  .node-dot.on{background:var(--green);box-shadow:0 0 6px var(--green)}
+  .node-dot.off{background:var(--text3)}
+  .node-dot.warn{background:var(--amber);box-shadow:0 0 6px var(--amber)}
+
+  /* ── TOPBAR ELEMENTS ── */
+  .tb-logo{font-size:14px;font-weight:700;color:var(--teal);letter-spacing:.05em}
+  .tb-sep{width:1px;height:20px;background:var(--border)}
+  .tb-label{font-size:11px;color:var(--text3)}
+  .tb-val{font-size:12px;font-weight:600;color:var(--text1);font-family:var(--mono)}
+  .tb-right{margin-left:auto;display:flex;align-items:center;gap:14px}
+  .pulse{width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse 2s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.7)}}
+
+  /* ── LOGIN OVERLAY ── */
+  #login-overlay{position:fixed;inset:0;background:#060E14;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;z-index:100}
+  #login-overlay input{width:280px;padding:10px 14px;background:var(--panel);border:1px solid var(--border);border-radius:8px;color:var(--text1);font-size:14px;outline:none;font-family:var(--sans)}
+  #login-overlay button{width:280px;padding:11px 0;background:var(--teal);border:none;border-radius:8px;color:#060E14;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sans)}
+  #login-err{font-size:12px;color:var(--red);min-height:16px}
+
+  /* ── MISC ── */
+  .tag{font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;letter-spacing:.06em;text-transform:uppercase}
+  .tag.nft{background:#0D2840;color:var(--teal)}
+  .tag.float{background:#1A1040;color:var(--purple)}
+  .scrollable{overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--border) transparent}
+</style>
+</head>
+<body>
+<div id="root">
+  <!-- LOGIN OVERLAY -->
+  <div id="login-overlay">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+      <svg width="28" height="28" viewBox="0 0 100 100" fill="none"><path d="M50 18C50 18 30 36 30 52C30 63.6 39 73 50 73C61 73 70 63.6 70 52C70 36 50 18 50 18Z" fill="none" stroke="#14B8A6" stroke-width="3"/><path d="M50 38C50 38 40 35 37 29C42 24 50 28 50 38Z" fill="#2ECC71"/><path d="M50 38C50 38 60 33 63 27C58 22 50 28 50 38Z" fill="#2ECC71" opacity=".75"/><line x1="50" y1="38" x2="50" y2="65" stroke="#14B8A6" stroke-width="3" stroke-linecap="round"/></svg>
+      <span style="font-size:20px;font-weight:700;color:#14B8A6;letter-spacing:.05em">NALHUITAD · NFT</span>
+    </div>
+    <p style="font-size:12px;color:#7A9EC0;margin-bottom:8px">Panel de Control · Invernadero B</p>
+    <input id="li-email" type="email" placeholder="Correo electrónico" autocomplete="email"/>
+    <input id="li-pass" type="password" placeholder="Contraseña" autocomplete="current-password"/>
+    <div id="login-err"></div>
+    <button id="li-btn">Ingresar al panel</button>
+  </div>
+
+  <!-- TOP BAR -->
+  <div class="topbar">
+    <span class="tb-logo">⬡ NALHUITAD</span>
+    <div class="tb-sep"></div>
+    <span class="tag nft">NFT</span>
+    <span class="tb-label">Invernadero B</span>
+    <div class="tb-sep"></div>
+    <span class="tb-label">pH</span>
+    <span class="tb-val" id="tb-ph">—</span>
+    <div class="tb-sep"></div>
+    <span class="tb-label">EC</span>
+    <span class="tb-val" id="tb-ec">—</span>
+    <div class="tb-sep"></div>
+    <span class="tb-label">T°agua</span>
+    <span class="tb-val" id="tb-temp">—</span>
+    <div class="tb-right">
+      <div class="pulse" id="sync-dot"></div>
+      <span class="tb-label" id="sync-time">Conectando...</span>
+      <div class="tb-sep"></div>
+      <span class="tb-val" id="tb-clock"></span>
+    </div>
+  </div>
+
+  <!-- MAIN GRID: Left | Center | Right -->
+  <div class="main">
+
+    <!-- ═══ COLUMNA IZQUIERDA ═══ -->
+    <div class="col">
+
+      <!-- Sensores principales -->
+      <div class="pcard">
+        <div class="plabel">pH · Solución nutritiva</div>
+        <div style="display:flex;align-items:baseline;gap:8px">
+          <span class="sval dim" id="ph-val">—</span>
+          <span style="font-size:11px;color:var(--text3)">rango 5.5–6.5</span>
+        </div>
+        <div style="margin-top:6px;height:4px;background:var(--sep);border-radius:2px;overflow:hidden">
+          <div id="ph-bar" style="height:100%;border-radius:2px;background:var(--green);width:60%;transition:width .5s"></div>
+        </div>
+      </div>
+
+      <div class="pcard">
+        <div class="plabel">EC · Conductividad eléctrica</div>
+        <div style="display:flex;align-items:baseline;gap:8px">
+          <span class="sval dim" id="ec-val">—</span>
+          <span style="font-size:11px;color:var(--text3)">µS/cm</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;margin-top:6px">
+          <span style="font-size:10px;color:var(--text3)">Setpoint</span>
+          <span style="font-size:10px;font-family:var(--mono);color:var(--text2)" id="ec-setpoint">1800 µS/cm</span>
+          <span style="margin-left:auto;font-size:10px;color:var(--text3)" id="ec-delta"></span>
+        </div>
+      </div>
+
+      <div class="pcard">
+        <div class="plabel">T° agua</div>
+        <div style="display:flex;align-items:baseline;gap:8px">
+          <span class="sval dim" id="temp-val">—</span>
+          <span style="font-size:11px;color:var(--text3)">°C · óptimo 18–22°C</span>
+        </div>
+      </div>
+
+      <!-- Oxigenación estimada -->
+      <div class="pcard" style="flex:1">
+        <div class="plabel">Oxigenación estimada (DO)</div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+          <span class="sval dim" id="o2-val">—</span>
+          <span style="font-size:10px;color:var(--text3)" id="o2-unit">mg/L est.</span>
+        </div>
+        <div id="o2-alert" style="display:none" class="alert-banner red">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <span id="o2-alert-msg">Riesgo de Hipoxia</span>
+        </div>
+        <p style="font-size:9px;color:var(--text3);margin-top:6px;line-height:1.4">Estimación basada en temperatura del agua. A 24°C el oxígeno disuelto cae ~8 mg/L (nivel crítico para raíces NFT).</p>
+      </div>
+    </div>
+
+    <!-- ═══ COLUMNA CENTRAL ═══ -->
+    <div class="col">
+
+      <!-- Alerta principal -->
+      <div id="main-alert" class="alert-banner green" style="flex-shrink:0">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+        <span id="main-alert-msg">Sistema nominal · Todos los parámetros en rango</span>
+      </div>
+
+      <!-- Gráfico tendencia EC y pH -->
+      <div class="pcard grow">
+        <div class="plabel">Tendencia EC / pH · Últimas 2 horas</div>
+        <div class="chart-wrap">
+          <canvas id="trend-chart"></canvas>
+        </div>
+      </div>
+
+      <!-- Bancadas -->
+      <div class="pcard" style="height:180px;flex-shrink:0">
+        <div class="plabel">Salud por bancada · Invernadero B</div>
+        <div class="scrollable" style="flex:1;max-height:148px" id="bancadas-list">
+          <div style="color:var(--text3);font-size:11px;padding:8px 0">Cargando lotes...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ COLUMNA DERECHA ═══ -->
+    <div class="col">
+
+      <!-- Temp. ambiente -->
+      <div class="pcard">
+        <div class="plabel">T° ambiente · Humedad</div>
+        <div style="display:flex;gap:12px;align-items:baseline">
+          <span class="sval dim" id="taire-val" style="font-size:24px">—</span>
+          <span style="font-size:13px;color:var(--text2)" id="hum-val">— %</span>
+        </div>
+      </div>
+
+      <!-- Nodos LilyGO -->
+      <div class="pcard">
+        <div class="plabel">Nodos LilyGO</div>
+        <div class="node-row">
+          <div class="node-dot off" id="nd-invb"></div>
+          <span style="font-size:11px;color:var(--text1)">Inv B (NFT)</span>
+          <span style="margin-left:auto;font-size:9px;font-family:var(--mono);color:var(--text3)" id="nd-invb-ts">sin señal</span>
+        </div>
+        <div class="node-row">
+          <div class="node-dot off" id="nd-inva"></div>
+          <span style="font-size:11px;color:var(--text1)">Inv A (Float)</span>
+          <span style="margin-left:auto;font-size:9px;font-family:var(--mono);color:var(--text3)" id="nd-inva-ts">sin señal</span>
+        </div>
+        <div class="node-row">
+          <div class="node-dot off" id="nd-ext"></div>
+          <span style="font-size:11px;color:var(--text1)">Exterior</span>
+          <span style="margin-left:auto;font-size:9px;font-family:var(--mono);color:var(--text3)">—</span>
+        </div>
+      </div>
+
+      <!-- Resumen producción -->
+      <div class="pcard">
+        <div class="plabel">Producción Inv B</div>
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <div style="display:flex;justify-content:space-between">
+            <span style="font-size:11px;color:var(--text3)">Plantas activas</span>
+            <span style="font-size:13px;font-weight:700;font-family:var(--mono);color:var(--text1)" id="prod-plantas">—</span>
+          </div>
+          <div style="display:flex;justify-content:space-between">
+            <span style="font-size:11px;color:var(--text3)">Bancadas en uso</span>
+            <span style="font-size:12px;font-family:var(--mono);color:var(--teal)" id="prod-bancadas">—</span>
+          </div>
+          <div style="display:flex;justify-content:space-between">
+            <span style="font-size:11px;color:var(--text3)">Próxima cosecha</span>
+            <span style="font-size:12px;font-family:var(--mono);color:var(--amber)" id="prod-cosecha">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Último raleo -->
+      <div class="pcard grow">
+        <div class="plabel">Último movimiento</div>
+        <div id="ultimo-mov" style="font-size:11px;color:var(--text2);line-height:1.7">—</div>
+      </div>
+
+      <!-- Calibración -->
+      <div class="pcard" style="flex-shrink:0">
+        <div class="plabel">Calibración sensores</div>
+        <div style="display:flex;gap:6px;margin-top:2px">
+          <button onclick="showCalibModal('ph')" style="flex:1;padding:6px 0;background:var(--card);border:1px solid var(--border);border-radius:6px;color:var(--text2);font-size:10px;font-weight:600;cursor:pointer;font-family:var(--sans)">Cal. pH</button>
+          <button onclick="showCalibModal('ec')" style="flex:1;padding:6px 0;background:var(--card);border:1px solid var(--border);border-radius:6px;color:var(--text2);font-size:10px;font-weight:600;cursor:pointer;font-family:var(--sans)">Cal. EC</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- CALIBRACIÓN MODAL -->
+<div id="calib-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:50;align-items:center;justify-content:center">
+  <div style="background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:24px;width:300px">
+    <p style="font-size:14px;font-weight:700;color:var(--text1);margin-bottom:4px" id="calib-title">Calibración pH</p>
+    <p style="font-size:11px;color:var(--text3);margin-bottom:16px">Sumergir sonda en solución de referencia y ajustar offset.</p>
+    <div style="margin-bottom:12px">
+      <p style="font-size:11px;color:var(--text2);margin-bottom:4px">Valor medido por sensor</p>
+      <input id="calib-measured" type="number" step="0.01" style="width:100%;padding:8px 10px;background:var(--card);border:1px solid var(--border);border-radius:6px;color:var(--text1);font-size:14px;font-family:var(--mono);outline:none"/>
+    </div>
+    <div style="margin-bottom:16px">
+      <p style="font-size:11px;color:var(--text2);margin-bottom:4px">Valor real solución buffer</p>
+      <input id="calib-real" type="number" step="0.01" style="width:100%;padding:8px 10px;background:var(--card);border:1px solid var(--border);border-radius:6px;color:var(--text1);font-size:14px;font-family:var(--mono);outline:none"/>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button onclick="applyCalib()" style="flex:1;padding:9px 0;background:var(--teal);border:none;border-radius:8px;color:#060E14;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--sans)">Aplicar offset</button>
+      <button onclick="closeCalibModal()" style="flex:1;padding:9px 0;background:none;border:1px solid var(--border);border-radius:8px;color:var(--text3);font-size:13px;cursor:pointer;font-family:var(--sans)">Cancelar</button>
+    </div>
+    <p style="font-size:10px;color:var(--text3);margin-top:10px" id="calib-result"></p>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+<script>
+// ══ FIREBASE CONFIG ══════════════════════════════════
+const FS_PROJECT = 'nalhuitad-d6758';
+const FS_KEY     = 'AIzaSyCHlsJDU0o7JsOvY4mgr5lVhiDOEok3C5w';
+const FS_BASE    = `https://firestore.googleapis.com/v1/projects/${FS_PROJECT}/databases/(default)/documents`;
+const AUTH_KEY   = 'AIzaSyC246p0MSQkLZwXXDj8ibJox940k6HHG5o';
+const AUTH_URL   = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${AUTH_KEY}`;
+const REFRESH_URL= `https://securetoken.googleapis.com/v1/token?key=${AUTH_KEY}`;
+const AUTH_STORE = 'hidro_auth_v1';
+
+// ══ FS HELPERS ═══════════════════════════════════════
+function toFSValue(v){
+  if(v===null||v===undefined)return{nullValue:null};
+  if(typeof v==='boolean')return{booleanValue:v};
+  if(typeof v==='number')return Number.isInteger(v)?{integerValue:String(v)}:{doubleValue:v};
+  if(typeof v==='string')return{stringValue:v};
+  if(Array.isArray(v))return{arrayValue:{values:v.map(toFSValue)}};
+  if(typeof v==='object')return{mapValue:{fields:toFSFields(v)}};
+}
+function toFSFields(obj){const f={};for(const[k,v]of Object.entries(obj))f[k]=toFSValue(v);return f;}
+function fromFSValue(v){
+  if(!v)return null;
+  if('stringValue' in v)return v.stringValue;
+  if('integerValue'in v)return parseInt(v.integerValue);
+  if('doubleValue' in v)return v.doubleValue;
+  if('booleanValue'in v)return v.booleanValue;
+  if('nullValue'   in v)return null;
+  if('arrayValue'  in v)return(v.arrayValue.values||[]).map(fromFSValue);
+  if('mapValue'    in v)return fromFSDoc({fields:v.mapValue.fields||{}});
+  return null;
+}
+function fromFSDoc(doc){
+  const obj={};
+  for(const[k,v]of Object.entries(doc.fields||{}))obj[k]=fromFSValue(v);
+  if(doc.name)obj.id=doc.name.split('/').pop();
+  return obj;
+}
+
+// ══ AUTH ═════════════════════════════════════════════
+const auth = {
+  load(){
+    try{return JSON.parse(localStorage.getItem(AUTH_STORE)||'null');}catch{return null;}
+  },
+  save(s){try{localStorage.setItem(AUTH_STORE,JSON.stringify({...s,ts:Date.now()}));}catch{}},
+  clear(){try{localStorage.removeItem(AUTH_STORE);}catch{}},
+  async getToken(){
+    const s=this.load();
+    if(!s?.idToken)return null;
+    if(s.expiresAt && Date.now()>s.expiresAt-5*60*1000){
+      try{
+        const r=await fetch(REFRESH_URL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:`grant_type=refresh_token&refresh_token=${s.refreshToken}`});
+        const j=await r.json();
+        if(!r.ok)return s.idToken;
+        const upd={...s,idToken:j.id_token,refreshToken:j.refresh_token,expiresAt:Date.now()+(parseInt(j.expires_in)*1000)};
+        this.save(upd);return upd.idToken;
+      }catch{return s.idToken;}
+    }
+    return s.idToken;
+  },
+  async headers(){const t=await this.getToken();const h={'Content-Type':'application/json'};if(t)h['Authorization']='Bearer '+t;return h;}
+};
+
+async function fsGet(col){
+  const r=await fetch(FS_BASE+'/'+col+'?key='+FS_KEY,{headers:await auth.headers()});
+  const j=await r.json();
+  return(j.documents||[]).map(fromFSDoc);
+}
+async function fsSet(col,id,data){
+  const{id:_,...rest}=data;
+  await fetch(FS_BASE+'/'+col+'/'+id+'?key='+FS_KEY,{method:'PATCH',headers:await auth.headers(),body:JSON.stringify({fields:toFSFields(rest)})});
+}
+
+// ══ ESTADO GLOBAL ════════════════════════════════════
+let lots=[];
+let sensorData={ph:null,ec:null,tempAgua:null,tempAire:null,humedad:null,lastUpdate:null};
+let calibOffsets={ph:0,ec:0};
+let calibType='ph';
+const STAGE_DAYS_RALEO={verano:22,otono:35,invierno:50,primavera:28};
+
+// Historial para gráfico (últimas 40 lecturas)
+const history={ec:[],ph:[],labels:[]};
+
+// ══ CLOCK ════════════════════════════════════════════
+function updateClock(){
+  const n=new Date();
+  document.getElementById('tb-clock').textContent=
+    n.toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit',second:'2-digit'})+
+    ' · '+n.toLocaleDateString('es-CL',{weekday:'short',day:'2-digit',month:'short'});
+}
+setInterval(updateClock,1000);
+updateClock();
+
+// ══ OXIGENACIÓN ESTIMADA ════════════════════════════
+// DO estimado basado en temperatura (Benson & Krause, agua dulce)
+function estimateO2(tempC){
+  if(tempC===null||isNaN(tempC))return null;
+  // Curva simplificada: DO = 14.62 * exp(-0.0393 * T)
+  return parseFloat((14.62*Math.exp(-0.0393*tempC)).toFixed(2));
+}
+
+// ══ ISL POR LOTE ════════════════════════════════════
+function getSeason(dateStr){
+  const m=new Date(dateStr||Date.now()).getMonth()+1;
+  if([12,1,2].includes(m))return'verano';
+  if([3,4,5].includes(m))return'otono';
+  if([6,7,8].includes(m))return'invierno';
+  return'primavera';
+}
+function daysSince(dateStr){
+  if(!dateStr)return 0;
+  return Math.floor((Date.now()-new Date(dateStr).getTime())/(1000*86400));
+}
+function calcISL(lot){
+  const qty=lot.quantity||1;
+  const mort=lot.mortalidadAcumulada||0;
+  const pMort=Math.max(0,1-(mort/qty));
+
+  // Sensores
+  let pSens=1;
+  if(sensorData.ph!==null&&lot.setpoints){
+    const sp=lot.setpoints;
+    const phOk=sensorData.ph>=sp.phMin&&sensorData.ph<=sp.phMax;
+    const ecOk=sensorData.ec!==null&&Math.abs(sensorData.ec-sp.ecTarget*1000)<=sp.ecTolerance*1000;
+    pSens=(phOk?1:0)*0.5+(ecOk?1:0)*0.5;
+  }
+
+  // Tiempo
+  const rh=(lot.stageHistory||[]).find(h=>h.stage==='raleo');
+  const diasEnRaleo=rh?daysSince(rh.date):0;
+  const maxDias=STAGE_DAYS_RALEO[getSeason(rh?.date)]||35;
+  const pTiempo=Math.max(0,1-(diasEnRaleo/maxDias));
+
+  return Math.round((pMort*40)+(pSens*40)+(pTiempo*20));
+}
+
+function islColor(isl){
+  if(isl>=75)return'var(--green)';
+  if(isl>=50)return'var(--amber)';
+  return'var(--red)';
+}
+
+function daysToHarvest(lot){
+  const rh=(lot.stageHistory||[]).find(h=>h.stage==='raleo');
+  if(!rh)return null;
+  const dias=daysSince(rh.date);
+  const max=STAGE_DAYS_RALEO[getSeason(rh.date)]||35;
+  return Math.max(0,max-dias);
+}
+
+// ══ RENDER BANCADAS ══════════════════════════════════
+function renderBancadas(){
+  const invBLots=lots.filter(l=>
+    l.stage==='raleo'&&
+    l.location?.invernadero==='B'
+  );
+
+  let totalPlantas=0;
+  const bancadasSet=new Set();
+  let nextCosecha=null;
+  let nextDias=999;
+
+  const html=invBLots.length===0
+    ?'<div style="color:var(--text3);font-size:11px;padding:8px 0">Sin lotes activos en Inv B</div>'
+    :invBLots.map(lot=>{
+      const isl=calcISL(lot);
+      const dias=daysToHarvest(lot);
+      const loc=lot.location;
+      const bid=loc?.identificador||'—';
+      totalPlantas+=(lot.currentQuantity||0);
+      if(loc?.tipo==='bancada')bancadasSet.add(bid);
+      if(dias!==null&&dias<nextDias){nextDias=dias;nextCosecha=`${bid} · ${dias}d`;}
+      const dotClr=islColor(isl);
+      const diasStr=dias!==null?(dias===0?'hoy':dias+'d'):'-';
+      return `<div class="bancada-item">
+        <div class="b-dot" style="background:${dotClr}"></div>
+        <span class="b-id">${bid}</span>
+        <span class="b-name">${lot.name}</span>
+        <span class="b-days">${diasStr}</span>
+        <span class="b-isl" style="color:${dotClr}">${isl}%</span>
+      </div>`;
+    }).join('');
+
+  document.getElementById('bancadas-list').innerHTML=html;
+  document.getElementById('prod-plantas').textContent=totalPlantas.toLocaleString();
+  document.getElementById('prod-bancadas').textContent=bancadasSet.size+' / 6';
+  document.getElementById('prod-cosecha').textContent=nextCosecha||(nextDias===999?'—':nextDias+'d');
+
+  // Último movimiento
+  const allRaleos=lots.flatMap(l=>(l.raleos||[]).filter(r=>r.destino?.invernadero==='B').map(r=>({...r,lotName:l.name})));
+  allRaleos.sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+  if(allRaleos.length>0){
+    const last=allRaleos[0];
+    document.getElementById('ultimo-mov').innerHTML=
+      `<span style="color:var(--teal)">${last.destino?.identificador||'—'}</span><br>`+
+      `${last.lotName}<br>`+
+      `<span style="color:var(--text3)">${last.cantidadRaleada||'?'} plantas · ${last.fecha||'—'}</span>`;
+  }
+}
+
+// ══ RENDER SENSORES ══════════════════════════════════
+function renderSensores(){
+  const {ph,ec,tempAgua,tempAire,humedad}=sensorData;
+
+  // pH
+  if(ph!==null){
+    const phAdj=parseFloat((ph+(calibOffsets.ph||0)).toFixed(2));
+    const phEl=document.getElementById('ph-val');
+    const inRange=phAdj>=5.5&&phAdj<=6.5;
+    phEl.textContent=phAdj.toFixed(2);
+    phEl.className='sval '+(inRange?'ok':phAdj<5.0||phAdj>7.0?'crit':'warn');
+    // Barra: 5.0=0% 7.0=100%
+    const pct=Math.min(100,Math.max(0,((phAdj-5.0)/2.0)*100));
+    const barClr=inRange?'var(--green)':phAdj<5.0||phAdj>7.0?'var(--red)':'var(--amber)';
+    document.getElementById('ph-bar').style.cssText=`height:100%;border-radius:2px;background:${barClr};width:${pct}%;transition:width .5s`;
+    document.getElementById('tb-ph').textContent=phAdj.toFixed(2);
+  }
+
+  // EC
+  if(ec!==null){
+    const ecAdj=Math.round(ec+(calibOffsets.ec||0));
+    const ecEl=document.getElementById('ec-val');
+    const setpoint=1800;
+    const tol=300;
+    const diff=ecAdj-setpoint;
+    const inRange=Math.abs(diff)<=tol;
+    ecEl.textContent=ecAdj.toLocaleString();
+    ecEl.className='sval '+(inRange?'ok':Math.abs(diff)>tol*1.5?'crit':'warn');
+    document.getElementById('ec-delta').textContent=(diff>=0?'+':'')+diff+' µS/cm';
+    document.getElementById('tb-ec').textContent=ecAdj.toLocaleString()+' µS';
+  }
+
+  // Temperatura agua
+  if(tempAgua!==null){
+    const tEl=document.getElementById('temp-val');
+    tEl.textContent=tempAgua.toFixed(1)+'°';
+    tEl.className='sval '+(tempAgua<22?'ok':tempAgua<24?'warn':'crit');
+    document.getElementById('tb-temp').textContent=tempAgua.toFixed(1)+'°C';
+
+    // O2 estimado
+    const o2=estimateO2(tempAgua);
+    if(o2!==null){
+      const o2El=document.getElementById('o2-val');
+      o2El.textContent=o2.toFixed(1);
+      const o2Alert=document.getElementById('o2-alert');
+      if(tempAgua>=24){
+        o2El.className='sval crit';
+        o2Alert.style.display='flex';
+        document.getElementById('o2-alert-msg').textContent=
+          `⚠ Riesgo de Hipoxia · ${o2.toFixed(1)} mg/L estimado (crítico <8 mg/L)`;
+      } else if(tempAgua>=22){
+        o2El.className='sval warn';
+        o2Alert.style.display='flex';
+        o2Alert.className='alert-banner amber';
+        document.getElementById('o2-alert-msg').textContent=
+          `Advertencia · T° en alza · O2 estimado ${o2.toFixed(1)} mg/L`;
+      } else {
+        o2El.className='sval ok';
+        o2Alert.style.display='none';
+      }
+    }
+  }
+
+  // Temp aire y humedad
+  if(tempAire!==null)document.getElementById('taire-val').textContent=tempAire.toFixed(1)+'°';
+  if(humedad!==null)document.getElementById('hum-val').textContent=humedad+'%';
+
+  // Alerta principal
+  updateMainAlert();
+}
+
+function updateMainAlert(){
+  const {ph,ec,tempAgua}=sensorData;
+  const mainAlert=document.getElementById('main-alert');
+  const mainMsg=document.getElementById('main-alert-msg');
+
+  let criticals=[];
+  if(tempAgua!==null&&tempAgua>=24)criticals.push('🔴 HIPOXIA · T° '+tempAgua.toFixed(1)+'°C — activar ventilación inmediata');
+  if(ph!==null&&(ph<5.0||ph>7.0))criticals.push('🔴 pH CRÍTICO · '+ph.toFixed(2)+' — ajustar solución');
+  if(ec!==null&&Math.abs(ec-1800)>600)criticals.push('🔴 EC CRÍTICO · '+Math.round(ec)+' µS/cm — revisar bomba');
+
+  let warnings=[];
+  if(tempAgua!==null&&tempAgua>=22&&tempAgua<24)warnings.push('⚠ T° en alza · '+tempAgua.toFixed(1)+'°C');
+  if(ph!==null&&(ph<5.5||ph>6.5)&&ph>=5.0&&ph<=7.0)warnings.push('⚠ pH fuera de rango · '+ph.toFixed(2));
+  if(ec!==null&&Math.abs(ec-1800)>300&&Math.abs(ec-1800)<=600)warnings.push('⚠ EC desviado · '+Math.round(ec)+' µS/cm');
+
+  if(criticals.length>0){
+    mainAlert.className='alert-banner red';
+    mainMsg.textContent=criticals[0];
+  } else if(warnings.length>0){
+    mainAlert.className='alert-banner amber';
+    mainMsg.textContent=warnings[0];
+  } else {
+    mainAlert.className='alert-banner green';
+    mainMsg.textContent=sensorData.lastUpdate
+      ?'Sistema nominal · Todos los parámetros en rango · '+new Date(sensorData.lastUpdate).toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'})
+      :'Sistema nominal · Esperando lectura de sensores...';
+  }
+}
+
+// ══ GRÁFICO TENDENCIA ════════════════════════════════
+let trendChart=null;
+
+function initChart(){
+  const ctx=document.getElementById('trend-chart').getContext('2d');
+  trendChart=new Chart(ctx,{
+    type:'line',
+    data:{
+      labels:[],
+      datasets:[
+        {label:'EC (×10⁻³)',data:[],borderColor:'#14B8A6',backgroundColor:'rgba(20,184,166,.08)',borderWidth:2,pointRadius:0,tension:.4,yAxisID:'y'},
+        {label:'pH',data:[],borderColor:'#A855F7',backgroundColor:'rgba(168,85,247,.08)',borderWidth:2,pointRadius:0,tension:.4,yAxisID:'y2'},
+      ]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,animation:false,
+      plugins:{legend:{labels:{color:'#7A9EC0',font:{size:10},boxWidth:12}}},
+      scales:{
+        x:{ticks:{color:'#3A5870',font:{size:9},maxTicksLimit:8},grid:{color:'#142840'}},
+        y:{position:'left',ticks:{color:'#14B8A6',font:{size:9}},grid:{color:'#142840'},title:{display:true,text:'EC (µS/cm)',color:'#14B8A6',font:{size:9}}},
+        y2:{position:'right',min:4,max:9,ticks:{color:'#A855F7',font:{size:9}},grid:{display:false},title:{display:true,text:'pH',color:'#A855F7',font:{size:9}}}
+      }
+    }
+  });
+}
+
+function pushToChart(ec,ph){
+  const label=new Date().toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'});
+  history.labels.push(label);
+  history.ec.push(ec!==null?parseFloat((ec/1000).toFixed(3)):null);
+  history.ph.push(ph);
+  if(history.labels.length>40){history.labels.shift();history.ec.shift();history.ph.shift();}
+  if(trendChart){
+    trendChart.data.labels=[...history.labels];
+    trendChart.data.datasets[0].data=[...history.ec];
+    trendChart.data.datasets[1].data=[...history.ph];
+    trendChart.update('none');
+  }
+}
+
+// ══ NODOS STATUS ═════════════════════════════════════
+function updateNodeStatus(){
+  const last=sensorData.lastUpdate;
+  const invBDot=document.getElementById('nd-invb');
+  const invBTs=document.getElementById('nd-invb-ts');
+  if(last){
+    const diffMin=Math.floor((Date.now()-new Date(last).getTime())/60000);
+    if(diffMin<3){
+      invBDot.className='node-dot on';
+      invBTs.textContent=diffMin===0?'ahora':'hace '+diffMin+'min';
+    } else if(diffMin<10){
+      invBDot.className='node-dot warn';
+      invBTs.textContent='hace '+diffMin+'min';
+    } else {
+      invBDot.className='node-dot off';
+      invBTs.textContent='offline';
+    }
+  }
+}
+
+// ══ DATA FETCH ═══════════════════════════════════════
+async function fetchData(){
+  try{
+    lots=await fsGet('lotes');
+    // Leer sensorData del lote con location.invernadero='B' más reciente
+    const invBLots=lots.filter(l=>l.sensorReadings?.lastUpdate&&l.location?.invernadero==='B');
+    if(invBLots.length>0){
+      invBLots.sort((a,b)=>(b.sensorReadings.lastUpdate||'').localeCompare(a.sensorReadings.lastUpdate||''));
+      const sr=invBLots[0].sensorReadings;
+      sensorData={
+        ph:sr.ph??null,
+        ec:sr.ec??null,
+        tempAgua:sr.tempAgua??null,
+        tempAire:sr.tempAire??null,
+        humedad:sr.humedad??null,
+        lastUpdate:sr.lastUpdate||null
+      };
+      pushToChart(sensorData.ec,sensorData.ph);
+    }
+    renderSensores();
+    renderBancadas();
+    updateNodeStatus();
+    document.getElementById('sync-time').textContent='Sync '+new Date().toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'});
+  }catch(e){
+    console.warn('fetch error',e);
+    document.getElementById('sync-time').textContent='Sin conexión';
+    document.getElementById('sync-dot').style.background='var(--red)';
+  }
+}
+
+// ══ CALIBRACIÓN ══════════════════════════════════════
+function showCalibModal(type){
+  calibType=type;
+  document.getElementById('calib-title').textContent='Calibración '+(type==='ph'?'pH':'EC');
+  document.getElementById('calib-measured').value='';
+  document.getElementById('calib-real').value=type==='ph'?'7.00':'1413';
+  document.getElementById('calib-result').textContent='';
+  document.getElementById('calib-modal').style.display='flex';
+}
+function closeCalibModal(){document.getElementById('calib-modal').style.display='none';}
+function applyCalib(){
+  const measured=parseFloat(document.getElementById('calib-measured').value);
+  const real=parseFloat(document.getElementById('calib-real').value);
+  if(isNaN(measured)||isNaN(real)){document.getElementById('calib-result').textContent='Ingresá valores válidos';return;}
+  const offset=real-measured;
+  calibOffsets[calibType]=offset;
+  localStorage.setItem('nalhuitad_calib',JSON.stringify(calibOffsets));
+  document.getElementById('calib-result').textContent=`Offset aplicado: ${offset>0?'+':''}${offset.toFixed(3)}`;
+  renderSensores();
+  setTimeout(closeCalibModal,1200);
+}
+
+// ══ LOGIN ════════════════════════════════════════════
+async function tryLogin(){
+  const email=document.getElementById('li-email').value.trim();
+  const pass=document.getElementById('li-pass').value;
+  const errEl=document.getElementById('login-err');
+  const btn=document.getElementById('li-btn');
+  btn.textContent='Iniciando...';btn.disabled=true;
+  try{
+    const r=await fetch(AUTH_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password:pass,returnSecureToken:true})});
+    const j=await r.json();
+    if(!r.ok){errEl.textContent=j?.error?.message||'Error de autenticación';btn.textContent='Ingresar al panel';btn.disabled=false;return;}
+    auth.save({idToken:j.idToken,refreshToken:j.refreshToken,email:j.email,expiresAt:Date.now()+(parseInt(j.expiresIn)*1000)});
+    showDashboard();
+  }catch(e){errEl.textContent='Error de red';btn.textContent='Ingresar al panel';btn.disabled=false;}
+}
+document.getElementById('li-btn').addEventListener('click',tryLogin);
+document.getElementById('li-pass').addEventListener('keydown',e=>e.key==='Enter'&&tryLogin());
+
+function showDashboard(){
+  document.getElementById('login-overlay').style.display='none';
+  initChart();
+  // Cargar offsets guardados
+  try{const saved=JSON.parse(localStorage.getItem('nalhuitad_calib')||'null');if(saved)calibOffsets=saved;}catch{}
+  fetchData();
+  setInterval(fetchData,30000); // refresh cada 30s
+  // Simular lecturas si no hay sensores (modo demo)
+  simulateIfEmpty();
+}
+
+// ══ MODO DEMO (sin sensores reales aún) ══════════════
+function simulateIfEmpty(){
+  setTimeout(()=>{
+    if(sensorData.ph===null){
+      console.log('[Waveshare] Modo demo activo — sin sensores RS485 conectados');
+      let t=0;
+      setInterval(()=>{
+        t+=0.05;
+        sensorData={
+          ph:parseFloat((6.0+Math.sin(t)*0.3).toFixed(2)),
+          ec:Math.round(1800+Math.cos(t*0.7)*200),
+          tempAgua:parseFloat((19+Math.sin(t*0.3)*2).toFixed(1)),
+          tempAire:parseFloat((16+Math.cos(t*0.2)).toFixed(1)),
+          humedad:Math.round(78+Math.sin(t*0.1)*5),
+          lastUpdate:new Date().toISOString()
+        };
+        pushToChart(sensorData.ec,sensorData.ph);
+        renderSensores();
+        updateNodeStatus();
+      },5000);
+    }
+  },3000);
+}
+
+// ══ INICIO ═══════════════════════════════════════════
+(function init(){
+  const session=auth.load();
+  if(session?.idToken&&session.ts&&Date.now()-session.ts<30*24*60*60*1000){
+    showDashboard();
+  }
+})();
+</script>
+</body>
+</html>
