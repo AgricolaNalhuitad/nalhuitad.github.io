@@ -576,16 +576,37 @@ const WEATHER_CODES = {
   95:'Tormenta', 96:'Tormenta con granizo', 99:'Tormenta intensa',
 };
 
-const WEATHER_ICONS = {
-  0:'☀️', 1:'🌤️', 2:'⛅', 3:'☁️',
-  45:'🌫️', 48:'🌫️',
-  51:'🌦️', 53:'🌦️', 55:'🌧️',
-  61:'🌧️', 63:'🌧️', 65:'🌧️',
-  71:'🌨️', 73:'🌨️', 75:'🌨️',
-  80:'🌦️', 81:'🌧️', 82:'⛈️',
-  85:'🌨️', 86:'🌨️',
-  95:'⛈️', 96:'⛈️', 99:'⛈️',
+// SVG weather icons — rendered inline, no emoji font dependency
+const WI = {
+  sun:   '<circle cx="12" cy="12" r="4" fill="#FEF08A" stroke="#FBBF24" stroke-width="1.5"/><g stroke="#FBBF24" stroke-width="1.5" stroke-linecap="round"><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/><line x1="4.2" y1="4.2" x2="6.3" y2="6.3"/><line x1="17.7" y1="17.7" x2="19.8" y2="19.8"/><line x1="4.2" y1="19.8" x2="6.3" y2="17.7"/><line x1="17.7" y1="6.3" x2="19.8" y2="4.2"/></g>',
+  cloud: '<path d="M18 10h-1.3A6 6 0 1 0 6 17h12a3 3 0 0 0 0-6z" fill="#CBD5E1" stroke="#94A3B8" stroke-width="1.2"/>',
+  pcld:  '<circle cx="9" cy="13" r="3" fill="#FEF08A" stroke="#FBBF24" stroke-width="1.2"/><path d="M16 11h-.9A4.5 4.5 0 1 0 5 15.5H16a2.5 2.5 0 0 0 0-5z" fill="#CBD5E1" stroke="#94A3B8" stroke-width="1.2"/>',
+  rain:  '<path d="M18 10h-1.3A6 6 0 1 0 6 17h12a3 3 0 0 0 0-6z" fill="#94A3B8" stroke="#64748B" stroke-width="1.2"/><g stroke="#60A5FA" stroke-width="1.5" stroke-linecap="round"><line x1="9" y1="19" x2="8" y2="21"/><line x1="12" y1="19" x2="11" y2="21"/><line x1="15" y1="19" x2="14" y2="21"/></g>',
+  snow:  '<path d="M18 10h-1.3A6 6 0 1 0 6 17h12a3 3 0 0 0 0-6z" fill="#BAE6FD" stroke="#7DD3FC" stroke-width="1.2"/><g fill="#BAE6FD" stroke="#7DD3FC" stroke-width="1"><circle cx="9" cy="20" r="1"/><circle cx="12" cy="21" r="1"/><circle cx="15" cy="20" r="1"/></g>',
+  storm: '<path d="M18 10h-1.3A6 6 0 1 0 6 17h12a3 3 0 0 0 0-6z" fill="#475569" stroke="#334155" stroke-width="1.2"/><polyline points="13,17 10,21 13,21 10,25" fill="none" stroke="#FCD34D" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>',
+  fog:   '<g stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round"><line x1="3" y1="10" x2="21" y2="10"/><line x1="3" y1="14" x2="21" y2="14"/><line x1="3" y1="18" x2="21" y2="18"/></g>',
+  moon:  '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" fill="#E2E8F0" stroke="#CBD5E1" stroke-width="1.2"/>',
 };
+const WCODE_TO_WI = {
+  0:'sun', 1:'pcld', 2:'pcld', 3:'cloud',
+  45:'fog', 48:'fog',
+  51:'rain', 53:'rain', 55:'rain',
+  61:'rain', 63:'rain', 65:'rain',
+  71:'snow', 73:'snow', 75:'snow',
+  80:'rain', 81:'rain', 82:'storm',
+  85:'snow', 86:'snow',
+  95:'storm', 96:'storm', 99:'storm',
+};
+function WeatherIcon({ code, size }) {
+  const key = WCODE_TO_WI[code] || 'sun';
+  return React.createElement('svg', {
+    width: size || 26, height: size || 26,
+    viewBox: '0 0 24 24', xmlns: 'http://www.w3.org/2000/svg',
+    dangerouslySetInnerHTML: { __html: WI[key] }
+  });
+}
+// Keep legacy map for any remaining references
+const WEATHER_ICONS = WCODE_TO_WI;
 
 const DIAS_SEMANA_CORTO = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
 
@@ -1253,7 +1274,7 @@ function WeatherCard() {
               borderRadius:40, margin:'6px 4px',
             }}>
               <p style={{fontSize:12, color: i===0?'#fff':'rgba(255,255,255,0.75)', fontWeight:i===0?700:400}}>{label}</p>
-              <span style={{fontSize:26, lineHeight:1}}>{WEATHER_ICONS[wcode] || '🌡️'}</span>
+              <WeatherIcon code={wcode} size={26} />
               <p style={{fontSize:15, fontWeight:600, color:'#fff', fontFamily:'DM Mono, monospace'}}>{tmp}°</p>
             </div>
           );
@@ -1275,7 +1296,7 @@ function WeatherCard() {
                 borderRadius:16,
               }}>
                 <p style={{fontSize:13, fontWeight:isToday?700:500, color:isToday?'#fff':'rgba(255,255,255,0.75)'}}>{dayName}</p>
-                <span style={{fontSize:28, lineHeight:1}}>{WEATHER_ICONS[d.weathercode[i]] || '🌡️'}</span>
+                <WeatherIcon code={d.weathercode[i]} size={28} />
                 <p style={{fontSize:12, fontWeight:600, color:'#fff', fontFamily:'DM Mono, monospace', whiteSpace:'nowrap'}}>{Math.round(d.temperature_2m_max[i])}°/{Math.round(d.temperature_2m_min[i])}°</p>
               </div>
             );
@@ -3477,18 +3498,57 @@ const AlertCard = React.memo(function AlertCard({ lot, alert, onSelect }) {
 function exportData(lots, format) {
   const fecha = new Date().toLocaleDateString('es-CL').replace(/\//g,'-');
 
-  // ── Hoja 1: Lotes ──
+  // ── Helpers ──
+  function fLoc(lot) {
+    if (!lot.location) return '';
+    return (lot.location.invernadero||'') + ' / ' + (lot.location.tipo||'') + ' ' + (lot.location.identificador||'');
+  }
+  function fTasaMerma(lot) {
+    const total = (lot.cosechas||[]).reduce((a,c) => a+(c.cosechadas||0)+(c.descartadas||0), 0);
+    const desc  = (lot.cosechas||[]).reduce((a,c) => a+(c.descartadas||0), 0);
+    return total > 0 ? Math.round((desc/total)*100) : 0;
+  }
+  function fISL(lot) {
+    const qty = lot.quantity || 1;
+    const mort = lot.mortalidadAcumulada || 0;
+    const pMort = Math.max(0, 1-(mort/qty));
+    const entry = (lot.stageHistory||[]).find(h=>h.stage===lot.stage);
+    const dias = daysSince(entry?.date || lot.date);
+    const maxDias = STAGE_DAYS[lot.stage]?.[getSeason(entry?.date)] || 30;
+    const pTiempo = Math.max(0, 1-(dias/maxDias));
+    return Math.round((pMort*50)+(pTiempo*50));
+  }
+  function fLastSensor(lot, key) {
+    return lot.sensorReadings?.[key] ?? '';
+  }
+
+  // ── Hoja 1: Lotes v2.0 ──
   const lotesRows = lots.map(lot => ({
-    'Nombre': lot.name,
-    'Variedad': lot.variety,
-    'Fecha siembra': lot.date,
-    'Almácigos': lot.quantity,
-    'Plantas al sembrar': toPlants(lot.quantity),
-    'Plantas en producción': lot.currentQuantity ?? toPlants(lot.quantity),
-    'Etapa actual': STAGES[lot.stage]?.label || lot.stage,
-    'Días en etapa actual': daysSince(lot.stageHistory?.[lot.stageHistory.length-1]?.date || lot.date),
-    'Días ciclo total': daysSince(lot.date),
-    'Notas': lot.notes || '',
+    'ID_Lote':               lot.id || '',
+    'ID_Padre':              lot.parentId || '',
+    'Nombre':                lot.name || '',
+    'Variedad':              lot.variety || '',
+    'Codigo_Variedad':       lot.varietyCode || '',
+    'Etapa_Actual':          STAGES[lot.stage]?.label || lot.stage,
+    'Fecha_Siembra':         lot.date || '',
+    'Invernadero':           lot.location?.invernadero || '',
+    'Tipo_Ubicacion':        lot.location?.tipo || '',
+    'Identificador_Ubicacion': lot.location?.identificador || '',
+    'Densidad_Siembra_pl_m': lot.densidadSiembra || '',
+    'Almacigos':             lot.quantity || 0,
+    'Plantas_Inicial':       toPlants(lot.quantity),
+    'Plantas_Actual':        lot.currentQuantity ?? toPlants(lot.quantity),
+    'Mortalidad_Acumulada':  lot.mortalidadAcumulada || 0,
+    'Tasa_Merma_Pct':        fTasaMerma(lot),
+    'ISL_Pct':               fISL(lot),
+    'Dias_Etapa_Actual':     daysSince(lot.stageHistory?.[lot.stageHistory.length-1]?.date || lot.date),
+    'Dias_Ciclo_Total':      daysSince(lot.date),
+    'pH_Ultimo':             fLastSensor(lot,'ph'),
+    'EC_Ultimo_uS':          fLastSensor(lot,'ec'),
+    'Temp_Agua_Ultimo':      fLastSensor(lot,'tempAgua'),
+    'Sensor_LastUpdate':     lot.sensorReadings?.lastUpdate || '',
+    'Lotes_Hijos':           (lot.childrenIds||[]).join(';'),
+    'Notas':                 lot.notes || '',
   }));
 
   // ── Hoja 2: Historial de etapas ──
@@ -3497,64 +3557,89 @@ function exportData(lots, format) {
     (lot.stageHistory || []).forEach((h, i) => {
       const prev = lot.stageHistory[i-1];
       etapasRows.push({
-        'Lote': lot.name,
-        'Etapa': STAGES[h.stage]?.label || h.stage,
-        'Fecha entrada': h.date,
-        'Plantas al entrar': h.quantity,
-        'Merma desde etapa anterior': prev ? (prev.quantity - h.quantity) : 0,
-        'Merma %': prev && prev.quantity > 0 ? Math.round(((prev.quantity - h.quantity) / prev.quantity) * 100) : 0,
+        'ID_Lote':       lot.id || '',
+        'Nombre':        lot.name,
+        'Variedad':      lot.variety,
+        'Etapa':         STAGES[h.stage]?.label || h.stage,
+        'Fecha_Entrada': h.date,
+        'Plantas_Entrada': h.quantity || 0,
+        'Invernadero':   h.location?.invernadero || lot.location?.invernadero || '',
+        'Ubicacion':     h.location ? (h.location.tipo+' '+(h.location.identificador||'')) : fLoc(lot),
+        'Merma_Plantas': prev ? Math.max(0,(prev.quantity||0)-(h.quantity||0)) : 0,
+        'Merma_Pct':     prev && prev.quantity > 0 ? Math.round((Math.max(0,(prev.quantity||0)-(h.quantity||0))/prev.quantity)*100) : 0,
         'Observaciones': h.notes || '',
       });
     });
   });
 
-  // ── Hoja 3: Cosechas ──
+  // ── Hoja 3: Raleos (nuevo en v2.0) ──
+  const raleosRows = [];
+  lots.forEach(lot => {
+    (lot.raleos || []).forEach(r => {
+      raleosRows.push({
+        'ID_Lote_Padre':   lot.id || '',
+        'Nombre_Padre':    lot.name,
+        'Variedad':        lot.variety,
+        'Fecha_Raleo':     r.fecha || '',
+        'Plantas_Raleadas': r.cantidadRaleada || 0,
+        'ID_Lote_Hijo':    r.lotHijoId || '',
+        'Inv_Destino':     r.destino?.invernadero || '',
+        'Tipo_Destino':    r.destino?.tipo || '',
+        'Ident_Destino':   r.destino?.identificador || '',
+      });
+    });
+  });
+
+  // ── Hoja 4: Cosechas ──
   const cosechasRows = [];
   lots.forEach(lot => {
     (lot.cosechas || []).forEach((c, i) => {
       cosechasRows.push({
-        'Lote': lot.name,
-        'Variedad': lot.variety,
-        'N° cosecha': i + 1,
-        'Fecha': c.date,
-        'Cosechadas': c.cosechadas || 0,
-        'Descartadas': c.descartadas || 0,
-        'Total': (c.cosechadas || 0) + (c.descartadas || 0),
-        'Notas': c.notes || '',
+        'ID_Lote':      lot.id || '',
+        'Nombre':       lot.name,
+        'Variedad':     lot.variety,
+        'Ubicacion':    fLoc(lot),
+        'N_Cosecha':    i + 1,
+        'Fecha':        c.date || '',
+        'Cosechadas':   c.cosechadas || 0,
+        'Descartadas':  c.descartadas || 0,
+        'Total':        (c.cosechadas||0) + (c.descartadas||0),
+        'Merma_Pct':    (c.cosechadas||0)+(c.descartadas||0) > 0 ? Math.round(((c.descartadas||0)/((c.cosechadas||0)+(c.descartadas||0)))*100) : 0,
+        'Notas':        c.notes || '',
       });
     });
   });
 
   if (format === 'csv') {
-    // Exportar solo lotes como CSV
     const headers = Object.keys(lotesRows[0] || {});
     const csvContent = [
       headers.join(','),
-      ...lotesRows.map(row => headers.map(h => `"${String(row[h]).replace(/"/g,'""')}"`).join(','))
+      ...lotesRows.map(row => headers.map(h => '"' + String(row[h]).replace(/"/g,'""') + '"').join(','))
     ].join('\n');
     const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = `Nalhuitad_lotes_${fecha}.csv`;
+    a.href = url; a.download = 'Nalhuitad_v2_' + fecha + '.csv';
     a.click(); URL.revokeObjectURL(url);
     return;
   }
 
-  // Excel con 3 hojas
+  // Excel con 4 hojas
   const wb = XLSX.utils.book_new();
-  const wsLotes = XLSX.utils.json_to_sheet(lotesRows.length ? lotesRows : [{}]);
-  const wsEtapas = XLSX.utils.json_to_sheet(etapasRows.length ? etapasRows : [{}]);
+  const wsLotes    = XLSX.utils.json_to_sheet(lotesRows.length    ? lotesRows    : [{}]);
+  const wsEtapas   = XLSX.utils.json_to_sheet(etapasRows.length   ? etapasRows   : [{}]);
+  const wsRaleos   = XLSX.utils.json_to_sheet(raleosRows.length   ? raleosRows   : [{}]);
   const wsCosechas = XLSX.utils.json_to_sheet(cosechasRows.length ? cosechasRows : [{}]);
 
-  // Ancho de columnas
-  [wsLotes, wsEtapas, wsCosechas].forEach(ws => {
-    ws['!cols'] = Array(20).fill({ wch: 18 });
+  [wsLotes, wsEtapas, wsRaleos, wsCosechas].forEach(ws => {
+    ws['!cols'] = Array(25).fill({ wch: 20 });
   });
 
-  XLSX.utils.book_append_sheet(wb, wsLotes, 'Lotes');
-  XLSX.utils.book_append_sheet(wb, wsEtapas, 'Historial de etapas');
+  XLSX.utils.book_append_sheet(wb, wsLotes,    'Lotes v2.0');
+  XLSX.utils.book_append_sheet(wb, wsEtapas,   'Historial etapas');
+  XLSX.utils.book_append_sheet(wb, wsRaleos,   'Raleos padre-hijo');
   XLSX.utils.book_append_sheet(wb, wsCosechas, 'Cosechas');
-  XLSX.writeFile(wb, `Nalhuitad_historial_${fecha}.xlsx`);
+  XLSX.writeFile(wb, 'Nalhuitad_v2_' + fecha + '.xlsx');
 }
 
 function HistorialScreen({ lots }) {
@@ -3907,6 +3992,7 @@ function NotifPermButton() {
   const handle = async () => {
     const result = await requestNotifPermission();
     setPerm(result);
+    if (result === 'granted') registerFCMToken();
   };
   if (perm === 'granted') return (
     <span style={{fontSize:12, fontWeight:600, color:'var(--green)', padding:'5px 12px', borderRadius:8, background:'var(--bg-card-h)'}}>✓ Activas</span>
@@ -3986,12 +4072,12 @@ function ConfigScreen({ session, onLogout, darkMode, onDarkMode }) {
 
       {/* Perfil */}
       <p style={{fontSize:12, fontWeight:600, letterSpacing:'0.06em', color:'var(--text-2)', textTransform:'uppercase', marginBottom:12}}>Perfil</p>
-      <div style={{background:'var(--bg-card)', border:'0.5px solid var(--border)', borderRadius:14, overflow:'hidden', marginBottom:20}}>\
-        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'14px 16px'}}>\
-          <div style={{flex:1, minWidth:0, marginRight:12}}>\
-            <p style={{fontSize:14, fontWeight:500, color:'var(--text-1)', marginBottom:2}}>Tu nombre o apodo</p>\
-            <p style={{fontSize:12, color:'var(--text-2)'}}>Aparece en el saludo del Dashboard</p>\
-          </div>\
+      <div style={{background:'var(--bg-card)', border:'0.5px solid var(--border)', borderRadius:14, overflow:'hidden', marginBottom:20}}>
+        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'14px 16px'}}>
+          <div style={{flex:1, minWidth:0, marginRight:12}}>
+            <p style={{fontSize:14, fontWeight:500, color:'var(--text-1)', marginBottom:2}}>Tu nombre o apodo</p>
+            <p style={{fontSize:12, color:'var(--text-2)'}}>Aparece en el saludo del Dashboard</p>
+          </div>
           <input
             id="cfg-nombre" name="cfg-nombre" type="text"
             placeholder="Ej: Grigor"
@@ -4012,11 +4098,11 @@ function ConfigScreen({ session, onLogout, darkMode, onDarkMode }) {
           </div>
           <NotifPermButton />
         </div>
-        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'14px 16px'}}>\
-          <div>\
-            <p style={{fontSize:14, fontWeight:500, color:'var(--text-1)', marginBottom:2}}>Probar notificación</p>\
-            <p style={{fontSize:12, color:'var(--text-2)'}}>Envía una notificación de prueba</p>\
-          </div>\
+        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'14px 16px'}}>
+          <div>
+            <p style={{fontSize:14, fontWeight:500, color:'var(--text-1)', marginBottom:2}}>Probar notificación</p>
+            <p style={{fontSize:12, color:'var(--text-2)'}}>Envía una notificación de prueba</p>
+          </div>
           <button onClick={async () => {
             const perm = await requestNotifPermission();
             if (perm === 'granted') {
@@ -4967,18 +5053,43 @@ function LoginScreen({ onLogin }) {
 // ── SISTEMA DE NOTIFICACIONES ─────────────────────────
 const NOTIF_CHECK_INTERVAL = 2 * 60 * 1000; // 2 minutos
 
+// VAPID key pública del proyecto Firebase nalhuitad-d6758
+// Obtenerla en: Consola Firebase → Configuración → Cloud Messaging → Clave pública del servidor web
+const FCM_VAPID_KEY = 'BOmSQIH5hnU1i-TMOGHmdObc6HK_N9ldjpkYWYkTzsv_GQ_c_pHIjAVFsQ-gYpMFVHyomMzROieVI-Vl8qTZMNg';
+
 async function registerSW() {
   if (!('serviceWorker' in navigator)) return;
   try {
     const reg = await navigator.serviceWorker.register('/nalhuitad.github.io/sw.js', { scope: '/nalhuitad.github.io/' });
-    // Registrar periodic sync si disponible
-    if ('periodicSync' in reg) {
-      try {
-        await reg.periodicSync.register('nalhuitad-notif', { minInterval: 2 * 60 * 1000 });
-      } catch {}
-    }
     return reg;
   } catch(e) { console.warn('[SW] No se pudo registrar:', e); }
+}
+
+async function registerFCMToken() {
+  try {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    if (Notification.permission !== 'granted') return;
+    const reg = await navigator.serviceWorker.ready;
+    // Suscripción Push con VAPID
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: FCM_VAPID_KEY,
+    });
+    // Guardar token en Firestore tokens/{deviceId}
+    const deviceId = localStorage.getItem('hidro_device_id') || (() => {
+      const id = 'dev_' + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+      localStorage.setItem('hidro_device_id', id);
+      return id;
+    })();
+    const tokenData = {
+      token: JSON.stringify(sub),
+      deviceId,
+      platform: navigator.userAgent.slice(0,80),
+      lastSeen: new Date().toISOString(),
+    };
+    await fsDb.set('tokens', deviceId, tokenData);
+    console.log('[FCM] Token registrado:', deviceId);
+  } catch(e) { console.warn('[FCM] Error registrando token:', e.message); }
 }
 
 async function requestNotifPermission() {
@@ -5142,16 +5253,17 @@ function App() {
       Object.assign(STAGE_DAYS, remote.stageDays);
     });
     // Registrar Service Worker para notificaciones
-    registerSW();
+    registerSW().then(() => {
+      if (Notification.permission === 'granted') registerFCMToken();
+    });
     return () => clearInterval(interval);
   }, [fetchLots]);
 
-  // Solicitar permiso de notificaciones una vez autenticado
+  // Guardar token en IndexedDB para SW cuando hay sesión activa
   useEffect(() => {
     if (!session) return;
     const s = fsAuth.load();
     if (s?.idToken) saveTokenForSW(s.idToken);
-    requestNotifPermission();
   }, [session]);
 
   // Verificar alertas de lotes cuando cambian
