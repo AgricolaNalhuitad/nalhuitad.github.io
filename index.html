@@ -1228,9 +1228,9 @@ function WeatherCard() {
   ];
 
   return (
-    <div style={{background:bg, border:'0.5px solid var(--border)', borderRadius:18, overflow:'hidden', marginBottom:8}}>
+    <div style={{background:bg, border:'0.5px solid var(--border)', borderRadius:18, overflow:'hidden', marginBottom:8, transform:'translateZ(0)', WebkitTransform:'translateZ(0)'}}>
       {/* Escena ilustrada */}
-      <div style={{position:'relative', height:196, overflow:'hidden'}}>
+      <div style={{position:'relative', height:196, overflow:'hidden', transform:'translateZ(0)', WebkitTransform:'translateZ(0)'}}>
         <SceneComponent />
         {/* Texto sobre escena — siempre legible */}
         <div style={{position:'absolute', top:0, left:0, right:0, padding:'18px 20px', display:'flex', justifyContent:'space-between', alignItems:'flex-start'}}>
@@ -1679,7 +1679,7 @@ const LotCard = React.memo(function LotCard({ lot, onSelect, muted }) {
       style={{
         background: accentBg,
         border: `0.5px solid ${accentColor ? accentColor : 'var(--border)'}`,
-        borderRadius:14, overflow:'hidden',
+        borderRadius:14, overflow:'hidden', transform:'translateZ(0)', WebkitTransform:'translateZ(0)',
         marginBottom:10, cursor:'pointer',
         opacity: muted ? 0.55 : 1,
         WebkitUserSelect:'none',
@@ -5566,7 +5566,7 @@ function App() {
       )}
 
       <div style={{flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minHeight:0, background:'var(--bg-1)'}}>
-        <div key={screen + (selectedLot||'')} className="fade-in" style={{flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minHeight:0}}>
+        <div key={screen + (selectedLot||'')} className="fade-in" style={{flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minHeight:0, background:'var(--bg-1)'}}>
           {renderMain()}
         </div>
       </div>
