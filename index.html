@@ -616,7 +616,7 @@ function useWeather() {
   useEffect(() => {
     const fetch7 = async () => {
       try {
-        const url = 'https://api.open-meteo.com/v1/forecast?latitude=-42.60&longitude=-73.77' +
+        const url = 'https://api.open-meteo.com/v1/forecast?latitude=-42.524511&longitude=-73.801944' +
           '&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,wind_direction_10m,weathercode,precipitation' +
           '&hourly=temperature_2m,weathercode,precipitation_probability' +
           '&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,weathercode' +
@@ -2870,7 +2870,10 @@ function DetalleLote({ lot, lots, onBack, backLabel = 'Volver', onUpdate, onDele
     name: lot.name,
     variety: VARIETIES.includes(lot.variety) ? lot.variety : 'Otra',
     customVariety: VARIETIES.includes(lot.variety) ? '' : lot.variety,
-    date: lot.date, quantity: String(lot.quantity), notes: lot.notes || ''
+    date: lot.date, quantity: String(lot.quantity), notes: lot.notes || '',
+    locInv:  lot.location?.invernadero || 'C',
+    locTipo: lot.location?.tipo        || 'piscina',
+    locId:   lot.location?.identificador || 'P01',
   });
   const [errors, setErrors] = useState({});
   const [saved, setSaved] = useState(false);
@@ -2893,6 +2896,11 @@ function DetalleLote({ lot, lots, onBack, backLabel = 'Volver', onUpdate, onDele
       ...lot,
       name: form.name.trim(),
       variety: form.variety === 'Otra' ? (form.customVariety?.trim() || 'Otra') : form.variety,
+      varietyCode: VARIETY_CODES[form.variety] || lot.varietyCode || 'OTR',
+      date: form.date,
+      quantity: parseInt(form.quantity),
+      notes: form.notes.trim(),
+      location: { invernadero: form.locInv, tipo: form.locTipo, identificador: form.locId },
       date: form.date,
       quantity: parseInt(form.quantity),
       notes: form.notes.trim(),
@@ -2959,6 +2967,31 @@ function DetalleLote({ lot, lots, onBack, backLabel = 'Volver', onUpdate, onDele
         <Field label="Notas (opcional)">
           <textarea id="edit-notas" name="edit-notas" value={form.notes} onChange={e => set('notes', e.target.value)}
             rows={3} style={{...inputStyle(), resize:'none', lineHeight:1.7}} />
+        </Field>
+
+        <Field label="Ubicación actual">
+          <div style={{display:'flex', gap:8}}>
+            <select value={form.locInv} onChange={e => set('locInv', e.target.value)}
+              style={{...inputStyle(), flex:1}}>
+              <option value="A">Inv A (Float)</option>
+              <option value="B">Inv B (NFT)</option>
+              <option value="C">Inv C</option>
+              <option value="D">Inv D (Castro)</option>
+            </select>
+            <select value={form.locTipo} onChange={e => { set('locTipo', e.target.value); set('locId', e.target.value==='bancada'?'B01':'P01'); }}
+              style={{...inputStyle(), flex:1}}>
+              <option value="piscina">Piscina</option>
+              <option value="bancada">Bancada</option>
+              <option value="bandeja">Bandeja</option>
+            </select>
+            <select value={form.locId} onChange={e => set('locId', e.target.value)}
+              style={{...inputStyle(), flex:1}}>
+              {(form.locTipo === 'bancada'
+                ? ['B01','B02','B03','B04','B05','B06','B07','B08']
+                : ['P01','P02','P03','P04','P05','P06','P07','P08']
+              ).map(id => <option key={id} value={id}>{id}</option>)}
+            </select>
+          </div>
         </Field>
 
         {confirmSave ? (
