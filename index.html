@@ -1350,8 +1350,49 @@ function LotesScreen({ lots, onSelect, goToNuevo, isFromCache, syncing }) {
   });
   const [capInput, setCapInput] = useState(String(capacidad));
   const [showQuickNote, setShowQuickNote] = useState(false);
-  // Mostrar skeletons mientras sincroniza y no hay datos aún
+  const [sortBy, setSortBy] = useState(() => {
+    try { return localStorage.getItem('hidro_sort') || 'date_asc'; }
+    catch { return 'date_asc'; }
+  });
   const showSkeletons = syncing && lots.length === 0;
+
+  const STAGE_ORDER = { almacigo:0, transplante:1, raleo:2, cosecha:3 };
+  const SORT_OPTS = [
+    { key:'date_asc',  label:'Fecha ↑ (antiguo)' },
+    { key:'date_desc', label:'Fecha ↓ (reciente)' },
+    { key:'stage',     label:'Por etapa' },
+    { key:'urgent',    label:'Más urgentes' },
+    { key:'isl',       label:'ISL crítico' },
+    { key:'name',      label:'Nombre A→Z' },
+  ];
+
+  const applySort = (arr) => {
+    const a = [...arr];
+    switch(sortBy) {
+      case 'date_asc':  return a.sort((x,y) => (x.date||'').localeCompare(y.date||''));
+      case 'date_desc': return a.sort((x,y) => (y.date||'').localeCompare(x.date||''));
+      case 'stage':     return a.sort((x,y) => (STAGE_ORDER[x.stage]||0) - (STAGE_ORDER[y.stage]||0));
+      case 'urgent': {
+        const days = l => { const e=(l.stageHistory||[]).slice(-1)[0]; return e ? daysSince(e.date) : 0; };
+        const max  = l => getMaxDays(l.stage, (l.stageHistory||[]).slice(-1)[0]?.date);
+        return a.sort((x,y) => (max(x)-days(x)) - (max(y)-days(y)));
+      }
+      case 'isl': {
+        const isl = l => { const q=l.quantity||1; const m=l.mortalidadAcumulada||0; return Math.round(((1-(m/q))*50)+50); };
+        return a.sort((x,y) => isl(x) - isl(y));
+      }
+      case 'name': return a.sort((x,y) => (x.name||'').localeCompare(y.name||'', 'es'));
+      default: return a;
+    }
+  };
+
+  const setSort = (key) => {
+    setSortBy(key);
+    try { localStorage.setItem('hidro_sort', key); } catch {}
+  };
+
+  const sortedActive    = applySort(active);
+  const sortedCosechados = applySort(cosechados);
 
   const saveCapacidad = () => {
     const val = parseInt(capInput);
@@ -1519,10 +1560,27 @@ function LotesScreen({ lots, onSelect, goToNuevo, isFromCache, syncing }) {
 
       {active.length > 0 && (
         <>
-          <p className="dm-section-label" style={{fontSize:12, fontWeight:600, letterSpacing:'0.06em', color:'var(--text-2)', textTransform:'uppercase', marginBottom:12}}>
-            En curso · {active.length} lote{active.length !== 1 ? 's' : ''}
-          </p>
-          {active.map(lot => (
+          {/* Selector de orden */}
+          <div style={{display:'flex', alignItems:'center', gap:8, marginBottom:12, flexWrap:'wrap'}}>
+            <p className="dm-section-label" style={{fontSize:12, fontWeight:600, letterSpacing:'0.06em', color:'var(--text-2)', textTransform:'uppercase', marginRight:'auto'}}>
+              En curso · {active.length} lote{active.length !== 1 ? 's' : ''}
+            </p>
+            <div style={{display:'flex', gap:4, overflowX:'auto', scrollbarWidth:'none'}}>
+              {SORT_OPTS.map(opt => (
+                <button key={opt.key} onClick={() => setSort(opt.key)} style={{
+                  padding:'4px 10px', borderRadius:20, border:'0.5px solid',
+                  borderColor: sortBy===opt.key ? 'var(--green)' : 'var(--border)',
+                  background: sortBy===opt.key ? 'var(--green)' : 'none',
+                  color: sortBy===opt.key ? 'var(--bg-1)' : 'var(--text-3)',
+                  fontSize:11, fontWeight: sortBy===opt.key ? 700 : 400,
+                  cursor:'pointer', whiteSpace:'nowrap', flexShrink:0,
+                }}>
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {sortedActive.map(lot => (
             <LotCard key={lot.id} lot={lot} onSelect={onSelect} />
           ))}
         </>
@@ -1532,7 +1590,7 @@ function LotesScreen({ lots, onSelect, goToNuevo, isFromCache, syncing }) {
           <p className="dm-section-label" style={{fontSize:12, fontWeight:600, letterSpacing:'0.06em', color:'var(--text-2)', textTransform:'uppercase', margin:'20px 0 12px'}}>
             Cosechados · {cosechados.length}
           </p>
-          {cosechados.map(lot => (
+          {sortedCosechados.map(lot => (
             <CosechadoCard key={lot.id} lot={lot} onSelect={onSelect} />
           ))}
         </>
@@ -4518,343 +4576,301 @@ function SensorIcon({ type, color }) {
   return <svg {...s}><circle cx="12" cy="12" r="5"/></svg>;
 }
 
-function SensoresScreen() {
+function SensoresScreen({ lots }) {
   const dm = useDarkMode();
-  const CLR = dm ? COLORS : COLORS_LIGHT;
 
-  const SENS = [
-    { id:'tw', label:'Temp. Agua',       model:'DS18B20',       unit:'°C',    color:CLR.stageT },
-    { id:'ha', label:'Hum. / Temp. Aire',model:'DHT22',         unit:'% / °C',color:CLR.green },
-    { id:'ph', label:'pH',               model:'pH-4502C',      unit:'pH',    color:CLR.stageR },
-    { id:'ec', label:'Conductividad',    model:'Atlas EZO-EC',  unit:'µS/cm', color:CLR.navActive },
-    { id:'nv', label:'Nivel Agua',       model:'HC-SR04',       unit:'cm',    color:CLR.text2 },
-  ];
-  const SCORR = { id:'co', label:'Corriente Motores', model:'SCT-013-030 × 6', unit:'A', color:CLR.amber };
+  // ── Calcular O2 estimado (Benson-Krause) ──────────────────
+  function estimateO2(t) {
+    if (t === null || t === undefined || isNaN(t)) return null;
+    return parseFloat((14.62 * Math.exp(-0.0393 * t)).toFixed(2));
+  }
 
-  const INV = [
-    { id:'A', label:'Invernadero A', sub:'Raíz flotante · 8 piscinas · 2.016 plantas · 6 motores', color:CLR.stageT, sensors: SENS.concat([SCORR]) },
-    { id:'B', label:'Invernadero B', sub:'NFT · 6 bancadas × 10 tubos · 1.740 plantas', color:CLR.green,  sensors: SENS },
-  ];
+  // ── Estado del nodo según antigüedad ──────────────────────
+  function nodeStatus(lastUpdate) {
+    if (!lastUpdate) return 'offline';
+    const age = Date.now() - new Date(lastUpdate).getTime();
+    if (age < 3 * 60 * 1000)  return 'online';
+    if (age < 30 * 60 * 1000) return 'stale';
+    return 'offline';
+  }
+  function nodeAge(lastUpdate) {
+    if (!lastUpdate) return 'Sin señal';
+    const min = Math.floor((Date.now() - new Date(lastUpdate).getTime()) / 60000);
+    if (min < 1)   return 'Ahora mismo';
+    if (min < 60)  return 'hace ' + min + ' min';
+    const h = Math.floor(min / 60);
+    return 'hace ' + h + 'h ' + (min % 60) + 'min';
+  }
 
-  return (
-    <div style={{flex:1, overflowY:'auto', padding:'16px 16px 80px', background:'var(--bg-1)', WebkitOverflowScrolling:'touch', overscrollBehavior:'contain'}}>
+  // ── Agrupar lotes con sensor por invernadero ───────────────
+  const invData = ['A', 'B'].map(inv => {
+    const invLots = lots.filter(l =>
+      l.location?.invernadero === inv &&
+      l.sensorReadings?.lastUpdate
+    );
+    // Tomar la lectura más reciente del invernadero
+    invLots.sort((a, b) =>
+      (b.sensorReadings.lastUpdate || '').localeCompare(a.sensorReadings.lastUpdate || '')
+    );
+    const sr  = invLots[0]?.sensorReadings || null;
+    const sp  = invLots[0]?.setpoints || { phMin:5.5, phMax:6.5, ecTarget:1800, ecTolerance:300, tempMaxAgua:24 };
+    const o2  = sr ? estimateO2(sr.tempAgua) : null;
+    const status = nodeStatus(sr?.lastUpdate);
+    return { inv, sr, sp, o2, status, lots: invLots };
+  });
 
-      <div className="dm-card" style={{
-        background:CLR.bgCard, border:'0.5px solid ' + CLR.border,
-        borderRadius:14, padding:'14px 16px', marginBottom:16,
-        display:'flex', alignItems:'flex-start', gap:13
-      }}>
-        <div style={{
-          width:42, height:42, borderRadius:11,
-          background:CLR.green + '18', border:'1px solid ' + CLR.green + '40',
-          display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0
-        }}>
-          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#95DD47" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="4" y="4" width="16" height="16" rx="2"/>
-            <rect x="9" y="9" width="6" height="6"/>
-            <line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/>
-            <line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/>
-            <line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="15" x2="23" y2="15"/>
-            <line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="15" x2="4" y2="15"/>
-          </svg>
+  const hasSensores = invData.some(d => d.sr !== null);
+
+  // ── Barra de rango ─────────────────────────────────────────
+  function RangeBar({ value, min, max, warn, crit, unit, label }) {
+    if (value === null || value === undefined) return null;
+    const pct = Math.min(100, Math.max(0, ((value - min) / (max - min)) * 100));
+    const inRange = value >= (warn || min) && value <= (crit || max);
+    const color = inRange ? 'var(--green)' : value > (crit || max) ? 'var(--red)' : 'var(--amber)';
+    return (
+      <div style={{ marginTop:6 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', marginBottom:3 }}>
+          <span style={{ fontSize:10, color:'var(--text-3)' }}>{min}{unit}</span>
+          <span style={{ fontSize:10, color:'var(--text-3)' }}>{max}{unit}</span>
         </div>
-        <div style={{flex:1, minWidth:0}}>
-          <div style={{display:'flex', alignItems:'center', gap:8, marginBottom:5, flexWrap:'wrap'}}>
-            <p style={{fontSize:14, fontWeight:600, color:'var(--text-1)'}}>LilyGO T-SIM7670G-S3</p>
+        <div style={{ height:5, background:'var(--sep)', borderRadius:3, overflow:'hidden' }}>
+          <div style={{ height:'100%', width: pct + '%', background:color, borderRadius:3, transition:'width .5s' }} />
+        </div>
+      </div>
+    );
+  }
+
+  // ── Tarjeta de métrica ─────────────────────────────────────
+  function MetricCard({ label, value, unit, color, rangeProps, alert }) {
+    const hasVal = value !== null && value !== undefined;
+    return (
+      <div style={{
+        background:'var(--bg-card)', border:'0.5px solid var(--border)',
+        borderRadius:12, padding:'12px 14px', flex:1, minWidth:0,
+      }}>
+        <p style={{ fontSize:11, color:'var(--text-3)', marginBottom:4, fontWeight:600, textTransform:'uppercase', letterSpacing:'.04em' }}>{label}</p>
+        <div style={{ display:'flex', alignItems:'baseline', gap:4 }}>
+          <span style={{ fontSize:26, fontWeight:700, fontFamily:'DM Mono, monospace', color: hasVal ? color : 'var(--text-3)', lineHeight:1 }}>
+            {hasVal ? value : '—'}
+          </span>
+          <span style={{ fontSize:12, color:'var(--text-3)' }}>{unit}</span>
+        </div>
+        {rangeProps && hasVal && <RangeBar value={parseFloat(value)} {...rangeProps} />}
+        {alert && (
+          <p style={{ fontSize:10, color:'var(--red)', marginTop:5, fontWeight:600 }}>{alert}</p>
+        )}
+      </div>
+    );
+  }
+
+  // ── Sin sensores — estado vacío ────────────────────────────
+  if (!hasSensores) {
+    return (
+      <div style={{ flex:1, overflowY:'auto', padding:'16px 16px 80px', background:'var(--bg-1)', WebkitOverflowScrolling:'touch', overscrollBehavior:'contain' }}>
+        {/* Header */}
+        <div style={{ marginBottom:20 }}>
+          <p style={{ fontSize:20, fontWeight:700, color:'var(--text-1)', marginBottom:4 }}>Sensores</p>
+          <p style={{ fontSize:13, color:'var(--text-3)' }}>Monitoreo en tiempo real · LilyGO RS485</p>
+        </div>
+
+        {/* Nodos pendientes */}
+        {['A','B'].map(inv => (
+          <div key={inv} style={{
+            background:'var(--bg-card)', border:'0.5px solid var(--border)',
+            borderRadius:14, padding:'14px 16px', marginBottom:12,
+            display:'flex', alignItems:'center', gap:12,
+          }}>
+            <div style={{
+              width:36, height:36, borderRadius:10, flexShrink:0,
+              background:'var(--bg-card-h)', border:'0.5px solid var(--border)',
+              display:'flex', alignItems:'center', justifyContent:'center',
+            }}>
+              <span style={{ fontSize:14, fontWeight:700, color:'var(--text-3)' }}>{inv}</span>
+            </div>
+            <div style={{ flex:1 }}>
+              <p style={{ fontSize:14, fontWeight:600, color:'var(--text-1)', marginBottom:2 }}>Invernadero {inv}</p>
+              <p style={{ fontSize:12, color:'var(--text-3)' }}>{inv==='A'?'Raíz flotante · 8 piscinas':'NFT · 6 bancadas × 10 tubos'}</p>
+            </div>
             <span style={{
               fontSize:10, fontWeight:700, color:'var(--amber)',
               background:'#E07B2A1E', border:'1px solid #E07B2A45',
-              borderRadius:6, padding:'2px 7px', letterSpacing:'0.03em'
-            }}>PENDIENTE</span>
+              borderRadius:6, padding:'3px 8px',
+            }}>SIN SEÑAL</span>
           </div>
-          <p style={{fontSize:12, color:'var(--text-2)', lineHeight:1.65}}>
-            {'2 microcontroladores 4G planificados, uno por invernadero. Los valores aparecerán en tiempo real cuando el hardware esté instalado.'}
+        ))}
+
+        {/* Sensores planificados */}
+        <div style={{ background:'var(--bg-card)', border:'0.5px solid var(--border)', borderRadius:14, padding:'14px 16px', marginBottom:12 }}>
+          <p style={{ fontSize:12, fontWeight:700, color:'var(--text-2)', textTransform:'uppercase', letterSpacing:'.05em', marginBottom:12 }}>Sensores planificados por nodo</p>
+          {[
+            { icon:'🌡', label:'Temperatura agua', model:'DS18B20', inv:'A y B' },
+            { icon:'⚗️', label:'pH', model:'RS485 pH+EC', inv:'A y B' },
+            { icon:'⚡', label:'Conductividad EC', model:'RS485 pH+EC', inv:'A y B' },
+            { icon:'💧', label:'O2 disuelto (est.)', model:'Calculado de T°agua', inv:'A y B' },
+            { icon:'📡', label:'Conectividad 4G', model:'LilyGO T-SIM7670G-S3', inv:'A y B' },
+          ].map((s, i, arr) => (
+            <div key={s.label} style={{
+              display:'flex', alignItems:'center', gap:10, paddingBottom:10,
+              marginBottom: i < arr.length-1 ? 10 : 0,
+              borderBottom: i < arr.length-1 ? '0.5px solid var(--sep)' : 'none',
+            }}>
+              <span style={{ fontSize:18 }}>{s.icon}</span>
+              <div style={{ flex:1 }}>
+                <p style={{ fontSize:13, fontWeight:500, color:'var(--text-1)' }}>{s.label}</p>
+                <p style={{ fontSize:11, color:'var(--text-3)' }}>{s.model}</p>
+              </div>
+              <span style={{ fontSize:11, color:'var(--text-3)' }}>{s.inv}</span>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ background:'var(--bg-card-h)', border:'0.5px solid var(--border)', borderRadius:12, padding:'12px 14px', display:'flex', gap:8 }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth="2" strokeLinecap="round" style={{flexShrink:0, marginTop:1}}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <p style={{ fontSize:12, color:'var(--text-3)', lineHeight:1.7 }}>
+            Cuando los nodos LilyGO estén instalados y enviando datos a Firebase, esta pantalla mostrará los valores en tiempo real con barras de rango, alertas visuales y estimación de O2 disuelto.
           </p>
         </div>
       </div>
+    );
+  }
 
-      {INV.map(function(inv) {
-        return (
-          <div key={inv.id} style={{marginBottom:16}}>
-            <div style={{display:'flex', alignItems:'center', gap:10, marginBottom:8}}>
-              <div style={{
-                width:30, height:30, borderRadius:9,
-                background:inv.color + '1E', border:'1px solid ' + inv.color + '45',
-                display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0
-              }}>
-                <span style={{fontSize:13, fontWeight:700, color:inv.color}}>{inv.id}</span>
-              </div>
-              <div style={{flex:1, minWidth:0}}>
-                <p style={{fontSize:14, fontWeight:600, color:'var(--text-1)', lineHeight:1.2}}>{inv.label}</p>
-                <p style={{fontSize:12, color:'var(--text-2)', lineHeight:1.3}}>{inv.sub}</p>
-              </div>
-              <div style={{
-                fontSize:11, fontWeight:600, color:'var(--text-2)',
-                background:'var(--bg-card-h)', border:'0.5px solid var(--border)',
-                borderRadius:6, padding:'3px 9px', flexShrink:0
-              }}>Sin conexión</div>
-            </div>
+  // ── CON SENSORES — vista en tiempo real ────────────────────
+  return (
+    <div style={{ flex:1, overflowY:'auto', padding:'16px 16px 80px', background:'var(--bg-1)', WebkitOverflowScrolling:'touch', overscrollBehavior:'contain' }}>
 
-            <div className="dm-card" style={{
-              background:'var(--bg-card)', border:'0.5px solid var(--border)', borderRadius:14, overflow:'hidden'
-            }}>
-              {inv.sensors.map(function(s, i) {
-                return (
-                  <div key={s.id} style={{
-                    display:'flex', alignItems:'center', gap:12, padding:'11px 14px',
-                    borderBottom: i < inv.sensors.length - 1 ? '0.5px solid var(--border)' : 'none'
-                  }}>
-                    <div style={{
-                      width:34, height:34, borderRadius:9,
-                      background:s.color + '1E', border:'1px solid ' + s.color + '45',
-                      display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0
-                    }}>
-                      <SensorIcon type={s.id} color={s.color} />
-                    </div>
-                    <div style={{flex:1, minWidth:0}}>
-                      <p style={{fontSize:13, fontWeight:500, color:'var(--text-1)'}}>{s.label}</p>
-                      <p style={{fontSize:12, color:'var(--text-2)', fontWeight:500}}>{s.model}</p>
-                    </div>
-                    <div style={{textAlign:'right', flexShrink:0}}>
-                      <p style={{fontSize:20, fontWeight:600, color:'var(--text-2)', fontFamily:'DM Mono, monospace', lineHeight:1}}>{'—'}</p>
-                      <p style={{fontSize:11, color:'var(--text-2)', marginTop:2}}>{s.unit}</p>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })}
-
-      <div style={{
-        borderRadius:12, padding:'12px 14px',
-        background:'var(--bg-card-h)', border:'0.5px solid var(--border)',
-        display:'flex', gap:10, alignItems:'flex-start'
-      }}>
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={'var(--text-3)'} strokeWidth="2" strokeLinecap="round" style={{flexShrink:0, marginTop:1}}>
-          <circle cx="12" cy="12" r="10"/>
-          <line x1="12" y1="8" x2="12" y2="12"/>
-          <line x1="12" y1="16" x2="12.01" y2="16"/>
-        </svg>
-        <p style={{fontSize:13, color:'var(--text-2)', lineHeight:1.7}}>
-          {'Actualización cada 30 seg. via 4G. Las alertas de pH, temperatura y conductividad fuera de rango llegarán como notificaciones push (requiere plan Blaze).'}
-        </p>
+      <div style={{ marginBottom:20 }}>
+        <p style={{ fontSize:20, fontWeight:700, color:'var(--text-1)', marginBottom:4 }}>Sensores</p>
+        <p style={{ fontSize:13, color:'var(--text-3)' }}>Actualización automática · LilyGO RS485</p>
       </div>
-    </div>
-  );
-}
 
-// ── NOTAS SCREEN ──────────────────────────────────────
-function NotasScreen({ lots }) {
-  const [notes, setNotes] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(NOTES_CACHE_KEY) || '[]'); }
-    catch { return []; }
-  });
-  const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
-  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+      {invData.map(({ inv, sr, sp, o2, status, lots: invLots }) => {
+        if (!sr) return null;
 
-  useEffect(() => {
-    fsDb.list('notas').then(data => {
-      const sorted = data.sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
-      setNotes(sorted);
-      try { localStorage.setItem(NOTES_CACHE_KEY, JSON.stringify(sorted)); } catch {}
-    }).catch(() => {}).finally(() => setLoading(false));
-  }, []);
+        const statusColor = status==='online'?'var(--green)':status==='stale'?'var(--amber)':'var(--red)';
+        const statusLabel = status==='online'?'En línea':status==='stale'?'Datos viejos':'Sin señal';
 
-  const handleSaved = (note) => {
-    setNotes(prev => [note, ...prev]);
-  };
+        // Alertas activas
+        const alerts = [];
+        if (sr.ph !== null && (sr.ph < sp.phMin || sr.ph > sp.phMax))
+          alerts.push({ color:'var(--red)', msg: 'pH ' + (sr.ph < sp.phMin ? 'bajo' : 'alto') + ' — ajustar solución' });
+        if (sr.ec !== null && Math.abs(sr.ec - sp.ecTarget) > sp.ecTolerance)
+          alerts.push({ color:'var(--red)', msg: 'EC desviada del setpoint — revisar concentración' });
+        if (sr.tempAgua !== null && sr.tempAgua >= 24)
+          alerts.push({ color:'var(--red)', msg: '⚠ Riesgo hipoxia — T°agua ' + sr.tempAgua.toFixed(1) + '°C' });
+        if (o2 !== null && o2 < 8)
+          alerts.push({ color:'var(--red)', msg: '⚠ O2 bajo — activar motores (' + o2 + ' mg/L)' });
+        if (o2 !== null && o2 >= 8 && o2 < 9)
+          alerts.push({ color:'var(--amber)', msg: 'O2 en límite — monitorear (' + o2 + ' mg/L)' });
 
-  const handleDelete = async (id) => {
-    setNotes(prev => prev.filter(n => n.id !== id));
-    try {
-      const updated = JSON.parse(localStorage.getItem(NOTES_CACHE_KEY) || '[]').filter(n => n.id !== id);
-      localStorage.setItem(NOTES_CACHE_KEY, JSON.stringify(updated));
-    } catch {}
-    try { await fsDb.del('notas', id); } catch {}
-    setConfirmDeleteId(null);
-  };
+        const ph = sr.ph ?? null; const ec = sr.ec ?? null; const tw = sr.tempAgua ?? null;
+        const phColor = ph === null ? 'var(--text-3)' : ph < sp.phMin || ph > sp.phMax ? 'var(--red)' : 'var(--green)';
+        const ecColor = ec === null ? 'var(--text-3)' : Math.abs(ec - sp.ecTarget) > sp.ecTolerance ? 'var(--red)' : 'var(--green)';
+        const tColor  = tw === null ? 'var(--text-3)' : tw >= 24 ? 'var(--red)' : tw >= 22 ? 'var(--amber)' : 'var(--green)';
+        const o2Color = o2 === null ? 'var(--text-3)' : o2 < 7 ? 'var(--red)' : o2 < 8 ? 'var(--amber)' : o2 < 9 ? 'var(--green)' : 'var(--stage-t)';
 
-  const months = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
-  const formatNoteDate = (ts) => {
-    try {
-      const d = new Date(ts);
-      const now = new Date();
-      const diff = Math.floor((now - d) / 60000);
-      if (diff < 1) return 'ahora';
-      if (diff < 60) return 'hace ' + diff + ' min';
-      if (diff < 1440) return 'hace ' + Math.floor(diff/60) + 'h';
-      return d.getDate() + ' ' + months[d.getMonth()] + (d.getFullYear() !== now.getFullYear() ? ' ' + d.getFullYear() : '');
-    } catch { return ''; }
-  };
-
-  return (
-    <div style={{flex:1, overflowY:'auto', padding:'16px 16px 100px', position:'relative'}}>
-      {loading && notes.length === 0 && (
-        <div style={{display:'flex', flexDirection:'column', gap:10}}>
-          {[1,2,3].map(i => <div key={i} className="skeleton" style={{height:72, borderRadius:12}} />)}
-        </div>
-      )}
-      {!loading && notes.length === 0 && (
-        <div style={{textAlign:'center', padding:'60px 20px'}}>
-          <div style={{width:56, height:56, borderRadius:16, background:'var(--bg-card-h)', display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 16px'}}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-          </div>
-          <p style={{fontSize:16, fontWeight:600, color:'var(--text-1)', marginBottom:6}}>Sin notas aún</p>
-          <p style={{fontSize:13, color:'var(--text-2)', lineHeight:1.6}}>Usá el botón verde para registrar observaciones del invernadero.</p>
-        </div>
-      )}
-      {notes.map((note, i) => {
-        const lot = note.lotId ? lots.find(l => l.id === note.lotId) : null;
-        const stageColor = lot ? STAGES[lot.stage]?.color : null;
-        const isConfirming = confirmDeleteId === note.id;
         return (
-          <div key={note.id || i} style={{
-            background:'var(--bg-card)', border:'0.5px solid var(--border)',
-            borderRadius:12, padding:'12px 14px', marginBottom:10,
-            borderLeft: stageColor ? '3px solid ' + stageColor : '3px solid var(--border)',
-          }}>
-            <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6}}>
-              <span style={{
-                fontSize:11, fontWeight:600, padding:'2px 8px', borderRadius:5,
-                background: stageColor ? stageColor + '20' : 'var(--bg-card-h)',
-                color: stageColor || 'var(--text-3)',
-              }}>
-                {note.lotName || 'General'}
-              </span>
-              <div style={{display:'flex', alignItems:'center', gap:8}}>
-                <span style={{fontSize:11, color:'var(--text-3)', fontFamily:'DM Mono, monospace'}}>
-                  {formatNoteDate(note.timestamp || note.date)}
-                </span>
-                {!isConfirming ? (
-                  <button onClick={() => setConfirmDeleteId(note.id)} style={{
-                    background:'none', border:'none', cursor:'pointer', padding:'2px 4px',
-                    borderRadius:6, display:'flex', alignItems:'center',
-                  }}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth="2" strokeLinecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
-                  </button>
-                ) : (
-                  <div style={{display:'flex', gap:6, alignItems:'center'}}>
-                    <span style={{fontSize:11, color:'var(--text-3)'}}>¿Eliminar?</span>
-                    <button onClick={() => handleDelete(note.id)} style={{
-                      fontSize:11, fontWeight:600, color:'var(--red)',
-                      background:'none', border:'0.5px solid var(--red)',
-                      borderRadius:5, padding:'2px 8px', cursor:'pointer'
-                    }}>Sí</button>
-                    <button onClick={() => setConfirmDeleteId(null)} style={{
-                      fontSize:11, color:'var(--text-2)',
-                      background:'none', border:'0.5px solid var(--border)',
-                      borderRadius:5, padding:'2px 8px', cursor:'pointer'
-                    }}>No</button>
-                  </div>
-                )}
-              </div>
-            </div>
-            <p style={{fontSize:14, color:'var(--text-1)', lineHeight:1.6, margin:0}}>{note.text}</p>
-          </div>
-        );
-      })}
-
-      {/* FAB nueva nota */}
-      <button
-        onClick={() => setShowModal(true)}
-        style={{
-          position:'fixed', bottom:80, right:16, zIndex:50,
-          width:48, height:48, borderRadius:24,
-          background:'var(--green)', border:'none',
-          display:'flex', alignItems:'center', justifyContent:'center',
-          cursor:'pointer', boxShadow:'0 4px 16px rgba(0,0,0,0.25)',
-        }}
-      >
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0F1219" strokeWidth="2.8" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-      </button>
-
-      {showModal && (
-        <QuickNoteModal lots={lots} onClose={() => setShowModal(false)} onSaved={handleSaved} />
-      )}
-    </div>
-  );
-}
-
-// ── NAV ────────────────────────────────────────────────
-const NAV = [
-  { id:'lotes',     label:'Lotes',     icon: LotesIcon },
-  { id:'dashboard', label:'Dashboard', icon: DashboardIcon },
-  { id:'nuevo',     label:'Nuevo',     icon: NuevoIcon },
-  { id:'notas',     label:'Notas',     icon: NotasIcon },
-  { id:'config',    label:'Config',    icon: ConfigIcon },
-];
-
-function NavBar({ active, onChange, alertCount }) {
-  return (
-    <div style={{
-      display:'flex', background:COLORS.navBg,
-      paddingBottom:'max(10px, env(safe-area-inset-bottom))',
-      borderTop:'0.5px solid var(--border)',
-    }}>
-      {NAV.map(({ id, label, icon: Icon }) => {
-        const isActive = active === id;
-        return (
-          <button
-            key={id}
-            data-nav={id}
-            onClick={() => onChange(id)}
-            style={{
-              flex:1, display:'flex', flexDirection:'column', alignItems:'center',
-              justifyContent:'center', padding:'10px 0 8px',
-              background:'none', border:'none', cursor:'pointer',
-              color: isActive ? COLORS.navActive : COLORS.navInactive,
-              transition:'color 0.15s, transform 0.1s', position:'relative',
-              WebkitUserSelect:'none',
-            }}
-            onTouchStart={e => e.currentTarget.style.transform='scale(0.9)'}
-            onTouchEnd={e => e.currentTarget.style.transform='scale(1)'}
-          >
-            <Icon active={isActive} />
-            {id === 'alertas' && alertCount > 0 && (
+          <div key={inv} style={{ marginBottom:20 }}>
+            {/* Header nodo */}
+            <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:10 }}>
               <div style={{
-                position:'absolute', top:8, left:'50%', transform:'translateX(6px)',
-                width:18, height:18, borderRadius:9, background:'var(--red)',
+                width:36, height:36, borderRadius:10, flexShrink:0,
+                background:statusColor + '18', border:'0.5px solid ' + statusColor + '50',
                 display:'flex', alignItems:'center', justifyContent:'center',
-                fontSize:10, fontWeight:700, color:'#fff'
-              }}>{alertCount}</div>
+              }}>
+                <span style={{ fontSize:14, fontWeight:700, color:statusColor }}>{inv}</span>
+              </div>
+              <div style={{ flex:1 }}>
+                <p style={{ fontSize:15, fontWeight:700, color:'var(--text-1)', marginBottom:1 }}>Invernadero {inv}</p>
+                <p style={{ fontSize:11, color:'var(--text-3)' }}>{nodeAge(sr.lastUpdate)}</p>
+              </div>
+              <span style={{
+                fontSize:10, fontWeight:700, color:statusColor,
+                background:statusColor + '18', border:'0.5px solid ' + statusColor + '45',
+                borderRadius:6, padding:'3px 9px',
+              }}>{statusLabel}</span>
+            </div>
+
+            {/* Alertas activas */}
+            {alerts.map((a, i) => (
+              <div key={i} style={{
+                display:'flex', alignItems:'center', gap:8, padding:'8px 12px',
+                background:a.color + '12', border:'0.5px solid ' + a.color + '40',
+                borderRadius:10, marginBottom:8,
+              }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={a.color} strokeWidth="2.5" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                <p style={{ fontSize:12, fontWeight:600, color:a.color }}>{a.msg}</p>
+              </div>
+            ))}
+
+            {/* Grid 2×2 métricas */}
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:8 }}>
+              <MetricCard
+                label="pH"
+                value={ph !== null ? ph.toFixed(2) : null}
+                unit=""
+                color={phColor}
+                rangeProps={{ min:4.5, max:8.0, warn:sp.phMin, crit:sp.phMax, unit:'' }}
+              />
+              <MetricCard
+                label="EC"
+                value={ec !== null ? Math.round(ec) : null}
+                unit="µS/cm"
+                color={ecColor}
+                rangeProps={{ min:sp.ecTarget-sp.ecTolerance*2, max:sp.ecTarget+sp.ecTolerance*2, warn:sp.ecTarget-sp.ecTolerance, crit:sp.ecTarget+sp.ecTolerance, unit:'' }}
+              />
+              <MetricCard
+                label="T° Agua"
+                value={tw !== null ? tw.toFixed(1) : null}
+                unit="°C"
+                color={tColor}
+                rangeProps={{ min:12, max:28, warn:18, crit:24, unit:'°C' }}
+              />
+              <MetricCard
+                label="O₂ Estimado"
+                value={o2}
+                unit="mg/L"
+                color={o2Color}
+                rangeProps={{ min:5, max:14, warn:8, crit:7, unit:'' }}
+                alert={o2 !== null && o2 < 8 ? 'Activar motores' : null}
+              />
+            </div>
+
+            {/* Setpoint EC */}
+            <div style={{
+              background:'var(--bg-card)', border:'0.5px solid var(--border)',
+              borderRadius:10, padding:'8px 12px', display:'flex', justifyContent:'space-between', alignItems:'center',
+            }}>
+              <p style={{ fontSize:12, color:'var(--text-3)' }}>Setpoint EC</p>
+              <p style={{ fontSize:13, fontWeight:600, color:'var(--text-2)', fontFamily:'DM Mono, monospace' }}>
+                {sp.ecTarget} ± {sp.ecTolerance} µS/cm
+              </p>
+            </div>
+
+            {/* Lotes monitoreados */}
+            {invLots.length > 0 && (
+              <div style={{ marginTop:8 }}>
+                <p style={{ fontSize:11, color:'var(--text-3)', marginBottom:6, fontWeight:600, textTransform:'uppercase', letterSpacing:'.04em' }}>
+                  Lotes en este invernadero
+                </p>
+                {invLots.map(lot => (
+                  <div key={lot.id} style={{
+                    display:'flex', alignItems:'center', gap:8, padding:'6px 0',
+                    borderBottom:'0.5px solid var(--sep)',
+                  }}>
+                    <div style={{ width:6, height:6, borderRadius:'50%', background:STAGES[lot.stage]?.color || 'var(--text-3)', flexShrink:0 }} />
+                    <p style={{ fontSize:12, color:'var(--text-1)', flex:1 }}>{lot.name}</p>
+                    <p style={{ fontSize:11, color:'var(--text-3)', fontFamily:'DM Mono, monospace' }}>
+                      {lot.location?.tipo} {lot.location?.identificador}
+                    </p>
+                  </div>
+                ))}
+              </div>
             )}
-            <span style={{fontSize:11, fontWeight: isActive ? 600 : 400, marginTop:3}}>{label}</span>
-            {isActive && (
-              <div style={{
-                position:'absolute', bottom:0, left:'50%', transform:'translateX(-50%)',
-                width:20, height:2, background:COLORS.navActive, borderRadius:'1px 1px 0 0'
-              }} />
-            )}
-          </button>
+          </div>
         );
       })}
     </div>
   );
-}
-
-function LotesIcon({ active }) {
-  return <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active?2.2:1.8} strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>;
-}
-function DashboardIcon({ active }) {
-  return <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active?2.2:1.8} strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><polyline points="8 21 12 17 16 21"/><polyline points="7 8 10 11 13 8 16 11"/></svg>;
-}
-function NuevoIcon({ active }) {
-  return <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active?2.2:1.8} strokeLinecap="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>;
-}
-function NotasIcon({ active }) {
-  return <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active?2.2:1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>;
-}
-function AlertasIcon({ active }) {
-  return <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active?2.2:1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>;
-}
-function HistorialIcon({ active }) {
-  return <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active?2.2:1.8} strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>;
-}
-function ConfigIcon({ active }) {
-  return <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active?2.2:1.8} strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>;
 }
 
 function SensoresIcon({ active }) {
@@ -5373,7 +5389,7 @@ function App() {
     if (screen === 'historial') return <HistorialScreen key="historial" lots={lots} />;
     if (screen === 'dashboard') return <DashboardScreen key="dashboard" lots={lots} onNavigate={handleNav} />;
     if (screen === 'config') return <ConfigScreen key="config" session={session} darkMode={darkMode} onDarkMode={setDarkMode} onLogout={() => { fsAuth.clear(); try { localStorage.removeItem(LOTS_CACHE_KEY); } catch {} setSession(null); }} />;
-    if (screen === 'sensores') return <SensoresScreen key="sensores" />;
+    if (screen === 'sensores') return <SensoresScreen key="sensores" lots={lots} />;
   };
 
   const screenTitle = {
