@@ -35,7 +35,7 @@ body.dark{
   --nav-bg:#0E1320;--nav-active:#4ADE80;--nav-inactive:#6B7FA3;
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-html,body,#root{height:100%;width:100%;overflow:hidden}
+html,body,#root{height:100%;width:100%;overflow:hidden}@supports(height:100dvh){html,body,#root{height:100dvh}}
 body{font-family:'DM Sans',sans-serif;background:var(--bg-1);color:var(--text-1);transition:background 0.3s,color 0.3s}
 body.dark{background:var(--bg-1);color:var(--text-1)}
 body input,body textarea{background:var(--bg-input);color:var(--text-1);border-color:var(--border)}
@@ -1394,7 +1394,7 @@ function LotesScreen({ lots, onSelect, goToNuevo, isFromCache, syncing }) {
 
   return (
     <>
-    <div style={{flex:1, overflowY:'auto', padding:'16px 16px 8px', position:'relative'}}>
+    <div style={{flex:1, overflowY:'auto', padding:'16px 16px 80px', position:'relative'}}>
       {isFromCache && syncing && (
         <div style={{
           display:'flex', alignItems:'center', gap:8,
@@ -1689,7 +1689,7 @@ const LotCard = React.memo(function LotCard({ lot, onSelect, muted }) {
       {accentColor && (
         <div style={{width:4, background: accentColor, flexShrink:0}} />
       )}
-      <div style={{flex:1, padding:'16px 18px'}}>
+      <div style={{flex:1, padding:'16px 18px 80px'}}>
         <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:10}}>
           <div style={{flex:1, minWidth:0, marginRight:8}}>
             <p style={{fontSize:12, fontWeight:600, color: STAGES[lot.stage].color, letterSpacing:'0.03em', textTransform:'uppercase', marginBottom:4}}>
@@ -1850,7 +1850,7 @@ function NuevoScreen({ onSave, goToLotes }) {
   };
 
   return (
-    <div style={{flex:1, overflowY:'auto', padding:'16px 18px'}}>
+    <div style={{flex:1, overflowY:'auto', padding:'16px 18px 80px'}}>
       <p className="dm-nuevo-label" style={{fontSize:12, fontWeight:600, letterSpacing:'0.06em', color:'var(--text-2)', textTransform:'uppercase', marginBottom:20}}>
         Registrar lote nuevo
       </p>
@@ -3437,7 +3437,7 @@ const AlertCard = React.memo(function AlertCard({ lot, alert, onSelect }) {
       {(isOverdue || isWarning) && (
         <div style={{width:4, background: accentColor, flexShrink:0}} />
       )}
-      <div style={{flex:1, padding:'16px 18px'}}>
+      <div style={{flex:1, padding:'16px 18px 80px'}}>
         <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:10}}>
           <div style={{flex:1, minWidth:0, marginRight:8}}>
             <p style={{fontSize:12, fontWeight:600, color: STAGES[lot.stage].color, letterSpacing:'0.03em', textTransform:'uppercase', marginBottom:4}}>
@@ -3726,7 +3726,7 @@ function HistorialScreen({ lots }) {
   }
 
   return (
-    <div style={{flex:1, overflowY:'auto', padding:'16px 18px 32px'}}>
+    <div style={{flex:1, overflowY:'auto', padding:'16px 18px 80px'}}>
 
       {conCosechas.length > 0 && (
         <>
@@ -4046,7 +4046,7 @@ function ConfigScreen({ session, onLogout, darkMode, onDarkMode }) {
   ];
 
   return (
-    <div style={{flex:1, overflowY:'auto', padding:'16px 18px 32px'}}>
+    <div style={{flex:1, overflowY:'auto', padding:'16px 18px 80px'}}>
 
       {/* Apariencia */}
       <p style={{fontSize:12, fontWeight:600, letterSpacing:'0.06em', color:'var(--text-2)', textTransform:'uppercase', marginBottom:12}}>Apariencia</p>
@@ -4254,7 +4254,7 @@ function DashboardScreen({ lots, onNavigate }) {
   const totalActivas = ptasAlmacigo + ptasTransplante + ptasRaleo;
 
   return (
-    <div style={{flex:1, overflowY:'auto', padding:'14px 16px 28px'}}>
+    <div style={{flex:1, overflowY:'auto', padding:'14px 16px 80px'}}>
 
       {/* Saludo + alertas contextuales Opción C */}
       <div style={{
@@ -4504,7 +4504,7 @@ function SensoresScreen() {
   ];
 
   return (
-    <div style={{flex:1, overflowY:'auto', padding:'16px 16px 28px'}}>
+    <div style={{flex:1, overflowY:'auto', padding:'16px 16px 80px'}}>
 
       <div className="dm-card" style={{
         background:CLR.bgCard, border:'0.5px solid ' + CLR.border,
