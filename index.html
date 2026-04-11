@@ -36,7 +36,7 @@ body.dark{
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body,#root{height:100%;width:100%;overflow:hidden}@supports(height:100dvh){html,body,#root{height:100dvh}}
-body{font-family:'DM Sans',sans-serif;background:var(--bg-1);color:var(--text-1);transition:background 0.3s,color 0.3s}
+body{font-family:'DM Sans',sans-serif;background:var(--bg-1);color:var(--text-1);transition:background 0.3s,color 0.3s;overscroll-behavior:none}
 body.dark{background:var(--bg-1);color:var(--text-1)}
 body input,body textarea{background:var(--bg-input);color:var(--text-1);border-color:var(--border)}
 body input[type=date]{color:var(--text-1);color-scheme:auto}
@@ -1394,7 +1394,7 @@ function LotesScreen({ lots, onSelect, goToNuevo, isFromCache, syncing }) {
 
   return (
     <>
-    <div style={{flex:1, overflowY:'auto', padding:'16px 16px 80px', position:'relative'}}>
+    <div style={{flex:1, overflowY:'auto', padding:'16px 16px 80px', position:'relative', background:'var(--bg-1)', WebkitOverflowScrolling:'touch', overscrollBehavior:'contain'}}>
       {isFromCache && syncing && (
         <div style={{
           display:'flex', alignItems:'center', gap:8,
@@ -1850,7 +1850,7 @@ function NuevoScreen({ onSave, goToLotes }) {
   };
 
   return (
-    <div style={{flex:1, overflowY:'auto', padding:'16px 18px 80px'}}>
+    <div style={{flex:1, overflowY:'auto', padding:'16px 18px 80px', background:'var(--bg-1)', WebkitOverflowScrolling:'touch', overscrollBehavior:'contain'}}>
       <p className="dm-nuevo-label" style={{fontSize:12, fontWeight:600, letterSpacing:'0.06em', color:'var(--text-2)', textTransform:'uppercase', marginBottom:20}}>
         Registrar lote nuevo
       </p>
@@ -3726,7 +3726,7 @@ function HistorialScreen({ lots }) {
   }
 
   return (
-    <div style={{flex:1, overflowY:'auto', padding:'16px 18px 80px'}}>
+    <div style={{flex:1, overflowY:'auto', padding:'16px 18px 80px', background:'var(--bg-1)', WebkitOverflowScrolling:'touch', overscrollBehavior:'contain'}}>
 
       {conCosechas.length > 0 && (
         <>
@@ -4046,7 +4046,7 @@ function ConfigScreen({ session, onLogout, darkMode, onDarkMode }) {
   ];
 
   return (
-    <div style={{flex:1, overflowY:'auto', padding:'16px 18px 80px'}}>
+    <div style={{flex:1, overflowY:'auto', padding:'16px 18px 80px', background:'var(--bg-1)', WebkitOverflowScrolling:'touch', overscrollBehavior:'contain'}}>
 
       {/* Apariencia */}
       <p style={{fontSize:12, fontWeight:600, letterSpacing:'0.06em', color:'var(--text-2)', textTransform:'uppercase', marginBottom:12}}>Apariencia</p>
@@ -4254,7 +4254,7 @@ function DashboardScreen({ lots, onNavigate }) {
   const totalActivas = ptasAlmacigo + ptasTransplante + ptasRaleo;
 
   return (
-    <div style={{flex:1, overflowY:'auto', padding:'14px 16px 80px'}}>
+    <div style={{flex:1, overflowY:'auto', padding:'14px 16px 80px', background:'var(--bg-1)', WebkitOverflowScrolling:'touch', overscrollBehavior:'contain'}}>
 
       {/* Saludo + alertas contextuales Opción C */}
       <div style={{
@@ -4504,7 +4504,7 @@ function SensoresScreen() {
   ];
 
   return (
-    <div style={{flex:1, overflowY:'auto', padding:'16px 16px 80px'}}>
+    <div style={{flex:1, overflowY:'auto', padding:'16px 16px 80px', background:'var(--bg-1)', WebkitOverflowScrolling:'touch', overscrollBehavior:'contain'}}>
 
       <div className="dm-card" style={{
         background:CLR.bgCard, border:'0.5px solid ' + CLR.border,
@@ -5565,7 +5565,7 @@ function App() {
         </div>
       )}
 
-      <div style={{flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minHeight:0}}>
+      <div style={{flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minHeight:0, background:'var(--bg-1)'}}>
         <div key={screen + (selectedLot||'')} className="fade-in" style={{flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minHeight:0}}>
           {renderMain()}
         </div>
