@@ -2472,6 +2472,156 @@ function CosechaModal({ lot, onClose, onConfirm, editData, editMode }) {
 }
 
 // ── LOT NOTES SECTION (usado en DetalleLote) ──────────
+// ── SENSOR HISTORY CHART ─────────────────────────────
+function LotSensorHistory({ lot }) {
+  const history = lot.sensorHistory || [];
+  const sr = lot.sensorReadings;
+
+  // Si no hay ni historial ni lectura actual, mostrar estado vacío
+  const hasData = history.length > 0 || sr?.lastUpdate;
+  if (!hasData) return null;
+
+  // Combinar historial + lectura actual
+  const points = [...history];
+  if (sr?.lastUpdate && !points.find(p => p.ts === sr.lastUpdate)) {
+    points.push({ ts: sr.lastUpdate, ph: sr.ph, ec: sr.ec, tempAgua: sr.tempAgua });
+  }
+  points.sort((a, b) => (a.ts||'').localeCompare(b.ts||''));
+  const last48 = points.filter(p => Date.now() - new Date(p.ts).getTime() < 48*3600000);
+  const display = last48.length > 0 ? last48 : points.slice(-20);
+
+  const W = 320; const H = 90; const PAD = { t:8, r:8, b:24, l:36 };
+  const chartW = W - PAD.l - PAD.r;
+  const chartH = H - PAD.t - PAD.b;
+
+  // Escalas
+  const phVals  = display.map(p => p.ph).filter(v => v != null);
+  const ecVals  = display.map(p => p.ec).filter(v => v != null);
+  const hasph   = phVals.length > 1;
+  const hasec   = ecVals.length > 1;
+
+  const phMin = 4.5; const phMax = 8.0;
+  const ecMin = Math.max(0, Math.min(...ecVals) - 200);
+  const ecMax = Math.max(...ecVals) + 200;
+
+  const scaleX  = (i) => PAD.l + (i / (display.length - 1)) * chartW;
+  const scalePh = (v) => PAD.t + chartH - ((v - phMin) / (phMax - phMin)) * chartH;
+  const scaleEc = (v) => PAD.t + chartH - ((v - ecMin) / (ecMax - ecMin)) * chartH;
+
+  const phPath = hasph ? display
+    .map((p, i) => p.ph != null ? (i === 0 ? 'M' : 'L') + scaleX(i).toFixed(1) + ',' + scalePh(p.ph).toFixed(1) : null)
+    .filter(Boolean).join(' ') : null;
+
+  const ecPath = hasec ? display
+    .map((p, i) => p.ec != null ? (i === 0 ? 'M' : 'L') + scaleX(i).toFixed(1) + ',' + scaleEc(p.ec).toFixed(1) : null)
+    .filter(Boolean).join(' ') : null;
+
+  // Líneas de referencia pH
+  const sp = lot.setpoints || { phMin:5.5, phMax:6.5 };
+  const yPhMin = scalePh(sp.phMin);
+  const yPhMax = scalePh(sp.phMax);
+
+  // Labels eje X — solo primero, medio y último
+  const xLabels = display.length > 1 ? [0, Math.floor(display.length/2), display.length-1] : [0];
+  const fmtTs = (ts) => {
+    try {
+      const d = new Date(ts);
+      return d.toLocaleTimeString('es-CL', { hour:'2-digit', minute:'2-digit' });
+    } catch { return ''; }
+  };
+
+  // Última lectura
+  const last = display[display.length - 1];
+  const lastPh = last?.ph != null ? last.ph.toFixed(2) : '—';
+  const lastEc = last?.ec != null ? Math.round(last.ec) : '—';
+  const lastT  = last?.tempAgua != null ? last.tempAgua.toFixed(1) + '°C' : '—';
+  const o2     = last?.tempAgua != null ? (14.62 * Math.exp(-0.0393 * last.tempAgua)).toFixed(1) : '—';
+
+  return (
+    <div style={{ background:'var(--bg-card)', border:'0.5px solid var(--border)', borderRadius:14, padding:'12px 14px', marginBottom:12 }}>
+      {/* Header */}
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
+        <p style={{ fontSize:12, fontWeight:700, color:'var(--text-2)', textTransform:'uppercase', letterSpacing:'.05em' }}>
+          Historial sensores
+        </p>
+        <p style={{ fontSize:10, color:'var(--text-3)' }}>
+          {display.length} lecturas · últimas 48h
+        </p>
+      </div>
+
+      {/* Valores actuales */}
+      <div style={{ display:'flex', gap:8, marginBottom:10 }}>
+        {[
+          { label:'pH', value:lastPh, color: last?.ph && (last.ph < sp.phMin || last.ph > sp.phMax) ? 'var(--red)' : 'var(--green)' },
+          { label:'EC', value: lastEc !== '—' ? lastEc + ' µS' : '—', color:'var(--stage-t)' },
+          { label:'T°', value:lastT, color: last?.tempAgua >= 24 ? 'var(--red)' : 'var(--text-2)' },
+          { label:'O₂', value: o2 !== '—' ? o2 + ' mg/L' : '—', color: parseFloat(o2) < 8 ? 'var(--amber)' : 'var(--stage-t)' },
+        ].map(m => (
+          <div key={m.label} style={{ flex:1, background:'var(--bg-card-h)', borderRadius:8, padding:'6px 8px', textAlign:'center' }}>
+            <p style={{ fontSize:9, color:'var(--text-3)', marginBottom:2 }}>{m.label}</p>
+            <p style={{ fontSize:12, fontWeight:700, color:m.color, fontFamily:'DM Mono, monospace' }}>{m.value}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Gráfico SVG */}
+      {display.length > 1 && (
+        <svg width="100%" viewBox={'0 0 ' + W + ' ' + H} style={{ display:'block' }}>
+          {/* Zona segura pH */}
+          <rect x={PAD.l} y={yPhMax} width={chartW} height={yPhMin - yPhMax}
+            fill="#2ECC71" opacity="0.06" />
+          {/* Líneas de referencia pH */}
+          <line x1={PAD.l} y1={yPhMin} x2={PAD.l + chartW} y2={yPhMin}
+            stroke="#2ECC71" strokeWidth="0.5" strokeDasharray="3,3" opacity="0.4" />
+          <line x1={PAD.l} y1={yPhMax} x2={PAD.l + chartW} y2={yPhMax}
+            stroke="#2ECC71" strokeWidth="0.5" strokeDasharray="3,3" opacity="0.4" />
+          {/* Grid horizontal */}
+          {[0.25, 0.5, 0.75].map(f => (
+            <line key={f} x1={PAD.l} y1={PAD.t + chartH * (1-f)} x2={PAD.l + chartW} y2={PAD.t + chartH * (1-f)}
+              stroke="var(--sep)" strokeWidth="0.5" />
+          ))}
+          {/* Eje Y label */}
+          <text x={PAD.l - 4} y={PAD.t + 4} textAnchor="end" fontSize="8" fill="var(--text-3)" opacity="0.7">pH</text>
+          {/* Línea EC */}
+          {ecPath && <path d={ecPath} fill="none" stroke="var(--stage-t)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.8" />}
+          {/* Línea pH */}
+          {phPath && <path d={phPath} fill="none" stroke="#A855F7" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />}
+          {/* Punto último valor pH */}
+          {hasph && last?.ph != null && (
+            <circle cx={scaleX(display.length-1)} cy={scalePh(last.ph)} r="3" fill="#A855F7" />
+          )}
+          {/* Punto último valor EC */}
+          {hasec && last?.ec != null && (
+            <circle cx={scaleX(display.length-1)} cy={scaleEc(last.ec)} r="3" fill="var(--stage-t)" />
+          )}
+          {/* Eje X labels */}
+          {xLabels.map(i => (
+            <text key={i} x={scaleX(i)} y={H - 4} textAnchor="middle" fontSize="8" fill="var(--text-3)" opacity="0.7">
+              {fmtTs(display[i]?.ts)}
+            </text>
+          ))}
+        </svg>
+      )}
+
+      {/* Leyenda */}
+      <div style={{ display:'flex', gap:12, marginTop:6 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+          <div style={{ width:16, height:2, background:'#A855F7', borderRadius:1 }} />
+          <span style={{ fontSize:9, color:'var(--text-3)' }}>pH</span>
+        </div>
+        <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+          <div style={{ width:16, height:2, background:'var(--stage-t)', borderRadius:1 }} />
+          <span style={{ fontSize:9, color:'var(--text-3)' }}>EC</span>
+        </div>
+        <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+          <div style={{ width:16, height:2, background:'#2ECC71', opacity:0.5, borderRadius:1, borderTop:'1px dashed #2ECC71' }} />
+          <span style={{ fontSize:9, color:'var(--text-3)' }}>Rango pH óptimo</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function LotNotesSection({ lotId, lotName }) {
   const [notes, setNotes] = useState([]);
   const [showModal, setShowModal] = useState(false);
@@ -3386,6 +3536,8 @@ function DetalleLote({ lot, lots, onBack, backLabel = 'Volver', onUpdate, onDele
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
         </button>
       )}
+
+      <LotSensorHistory lot={lot} />
 
       <LotNotesSection lotId={lot.id} lotName={lot.name} />
 
