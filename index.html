@@ -25,9 +25,9 @@
 
 <style>
 :root{
-  --bg-1:#F5F7FA;--bg-2:#EBEEF4;--bg-card:#FFFFFF;--bg-card-h:#EEF1F8;--bg-input:#FFFFFF;
-  --text-1:#111827;--text-2:#3A4D6B;--text-3:#5C6F8A;
-  --border:#CDD4E8;--sep:#E2E7F2;
+  --bg-1:#F4F6FA;--bg-2:#E8EDF6;--bg-card:#FFFFFF;--bg-card-h:#E4EAF6;--bg-input:#FFFFFF;
+  --text-1:#0D1829;--text-2:#1E3A5F;--text-3:#3D5278;
+  --border:#A8BCDA;--sep:#CCDAEE;
   --stage-a:#B8701A;--stage-t:#1E6DB5;--stage-r:#A02870;--stage-c:#6B3FA0;
   --green:#157A40;--red:#C0392B;--amber:#C47A1A;
   --nav-bg:#131720;--nav-active:#4ADE80;--nav-inactive:#8BA4C8;
@@ -3988,6 +3988,175 @@ function exportData(lots, format) {
   XLSX.writeFile(wb, 'Nalhuitad_v2_' + fecha + '.xlsx');
 }
 
+// ── PRODUCCIÓN PRÓXIMOS 30 DÍAS ──────────────────────────
+function ProduccionScreen({ lots, onBack }) {
+  const hoy = new Date();
+  const fin  = new Date(hoy); fin.setDate(fin.getDate() + 30);
+
+  // Proyectar todas las cosechas de lotes en raleo en los próximos 30 días
+  const eventos = [];
+  lots.filter(l => l.stage === 'raleo').forEach(lot => {
+    projectHarvests(lot).forEach(h => {
+      if (h.date >= hoy && h.date <= fin) eventos.push(h);
+    });
+  });
+  // También incluir lotes en transplante que podrían entrar a raleo
+  lots.filter(l => l.stage === 'transplante').forEach(lot => {
+    const th = (lot.stageHistory||[]).find(h => h.stage==='transplante');
+    if (!th) return;
+    const season = getSeason();
+    const diasTransplante = STAGE_DAYS.transplante?.[season] || 15;
+    const fTransplante = new Date(th.date + 'T12:00:00');
+    fTransplante.setDate(fTransplante.getDate() + diasTransplante);
+    if (fTransplante <= fin) {
+      // Va a entrar a raleo dentro de los 30 días
+      const diasRaleo = STAGE_DAYS.raleo?.[season] || 35;
+      const fCosecha = new Date(fTransplante);
+      fCosecha.setDate(fCosecha.getDate() + diasRaleo);
+      if (fCosecha <= new Date(fin.getTime() + 30*86400000)) {
+        const qty = lot.currentQuantity ?? toPlants(lot.quantity);
+        if (qty > 0) {
+          eventos.push({ date: fCosecha, plants: Math.min(qty, CAPACITY_PER_TRIP), lotName: lot.name, variety: lot.variety, lotId: lot.id, proyectado: true, pendienteRaleo: true });
+        }
+      }
+    }
+  });
+  eventos.sort((a,b) => a.date - b.date);
+
+  // Agrupar por semana
+  const semanas = [[], [], [], []];
+  const labels  = [];
+  for (let s = 0; s < 4; s++) {
+    const ini = new Date(hoy); ini.setDate(ini.getDate() + s*7);
+    const ter = new Date(ini); ter.setDate(ter.getDate() + 6);
+    const d1 = ini.getDate() + '/' + (ini.getMonth()+1);
+    const d2 = ter.getDate() + '/' + (ter.getMonth()+1);
+    labels.push(d1 + '–' + d2);
+    eventos.forEach(e => {
+      if (e.date >= ini && e.date <= ter) semanas[s].push(e);
+    });
+  }
+  const totSemanas = semanas.map(s => s.reduce((a,e)=>a+e.plants,0));
+  const totalTotal = totSemanas.reduce((a,b)=>a+b,0);
+  const maxSem = Math.max(...totSemanas, 210);
+
+  const DIAS_CORTOS = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+  const MESES_CORTOS = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  const fmtFecha = d => d.getDate() + ' ' + MESES_CORTOS[d.getMonth()];
+
+  return (
+    <div style={{flex:1, overflowY:'auto', padding:'16px 16px 80px', background:'var(--bg-1)', WebkitOverflowScrolling:'touch', overscrollBehavior:'contain'}}>
+      {/* Header */}
+      <div style={{display:'flex', alignItems:'center', gap:10, marginBottom:20}}>
+        <button onClick={onBack} style={{background:'none', border:'none', color:'var(--green)', cursor:'pointer', padding:0, display:'flex', alignItems:'center', gap:5, fontSize:13, fontWeight:500}}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M19 12H5M12 5l-7 7 7 7"/></svg>
+          Dashboard
+        </button>
+        <div style={{flex:1}}>
+          <p style={{fontSize:18, fontWeight:700, color:'var(--text-1)'}}>Próximos 30 días</p>
+          <p style={{fontSize:12, color:'var(--text-3)'}}>Proyección de cosechas · {fmtFecha(hoy)} – {fmtFecha(fin)}</p>
+        </div>
+      </div>
+
+      {/* KPI total */}
+      <div style={{background:'var(--stage-c)18', border:'0.5px solid var(--stage-c)50', borderRadius:14, padding:'14px 16px', marginBottom:16, display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+        <div>
+          <p style={{fontSize:11, color:'var(--stage-c)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.05em', marginBottom:3}}>Total proyectado</p>
+          <p style={{fontSize:32, fontWeight:700, color:'var(--text-1)', fontFamily:'DM Mono, monospace', lineHeight:1}}>{totalTotal.toLocaleString()}</p>
+          <p style={{fontSize:12, color:'var(--text-3)', marginTop:3}}>lechugas en 30 días</p>
+        </div>
+        <div style={{textAlign:'right'}}>
+          <p style={{fontSize:11, color:'var(--text-3)', marginBottom:4}}>Promedio semanal</p>
+          <p style={{fontSize:22, fontWeight:700, color:'var(--stage-c)', fontFamily:'DM Mono, monospace'}}>{Math.round(totalTotal/4).toLocaleString()}</p>
+          <p style={{fontSize:11, color:'var(--text-3)', marginTop:2}}>{eventos.length} cosechas programadas</p>
+        </div>
+      </div>
+
+      {/* Gráfico barras por semana */}
+      <div style={{background:'var(--bg-card)', border:'0.5px solid var(--border)', borderRadius:14, padding:'14px 14px 10px', marginBottom:14}}>
+        <p style={{fontSize:11, fontWeight:700, color:'var(--text-2)', textTransform:'uppercase', letterSpacing:'.05em', marginBottom:12}}>Distribución semanal</p>
+        <div style={{display:'flex', gap:6, alignItems:'flex-end', height:80, marginBottom:8}}>
+          {totSemanas.map((tot, i) => {
+            const pct = maxSem > 0 ? Math.max(4, (tot/maxSem)*80) : 4;
+            const sobreCap = tot > CAPACITY_PER_TRIP * 7;
+            return (
+              <div key={i} style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:3}}>
+                <p style={{fontSize:9, color: sobreCap ? 'var(--amber)' : 'var(--text-3)', fontWeight:600}}>{tot > 0 ? tot.toLocaleString() : '—'}</p>
+                <div style={{width:'100%', height:pct, background: tot === 0 ? 'var(--sep)' : sobreCap ? 'var(--amber)' : 'var(--stage-c)', borderRadius:'4px 4px 2px 2px', opacity: tot===0?0.4:0.85}} />
+              </div>
+            );
+          })}
+        </div>
+        <div style={{display:'flex', gap:6}}>
+          {labels.map((l,i) => (
+            <div key={i} style={{flex:1, textAlign:'center'}}>
+              <p style={{fontSize:9, color:'var(--text-3)'}}>{l}</p>
+            </div>
+          ))}
+        </div>
+        {totSemanas.some(t => t > CAPACITY_PER_TRIP * 7) && (
+          <div style={{marginTop:8, padding:'6px 10px', background:'var(--amber)15', borderRadius:8, border:'0.5px solid var(--amber)40', display:'flex', gap:6, alignItems:'center'}}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--amber)" strokeWidth="2.5" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <p style={{fontSize:11, color:'var(--amber)', fontWeight:600}}>Semana con producción sobre capacidad de transporte diaria</p>
+          </div>
+        )}
+      </div>
+
+      {/* Listado por semana */}
+      {semanas.map((evts, si) => (
+        <div key={si} style={{marginBottom:12}}>
+          <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8}}>
+            <p style={{fontSize:11, fontWeight:700, color:'var(--text-2)', textTransform:'uppercase', letterSpacing:'.05em'}}>
+              {'Semana ' + (si+1) + ' · ' + labels[si]}
+            </p>
+            <p style={{fontSize:12, fontWeight:700, color: totSemanas[si]>0?'var(--stage-c)':'var(--text-3)', fontFamily:'DM Mono, monospace'}}>
+              {totSemanas[si] > 0 ? totSemanas[si].toLocaleString() + ' uds' : 'Sin cosechas'}
+            </p>
+          </div>
+          {evts.length === 0 ? (
+            <div style={{background:'var(--bg-card)', border:'0.5px solid var(--border)', borderRadius:10, padding:'10px 14px'}}>
+              <p style={{fontSize:12, color:'var(--text-3)', textAlign:'center'}}>Sin cosechas proyectadas</p>
+            </div>
+          ) : (
+            <div style={{background:'var(--bg-card)', border:'0.5px solid var(--border)', borderRadius:12, overflow:'hidden'}}>
+              {evts.map((e, ei) => (
+                <div key={ei} style={{display:'flex', alignItems:'center', gap:10, padding:'10px 14px', borderBottom: ei<evts.length-1?'0.5px solid var(--sep)':'none'}}>
+                  <div style={{width:38, textAlign:'center', flexShrink:0}}>
+                    <p style={{fontSize:9, color:'var(--text-3)', textTransform:'uppercase'}}>{DIAS_CORTOS[e.date.getDay()]}</p>
+                    <p style={{fontSize:16, fontWeight:700, color:'var(--text-1)', lineHeight:1}}>{e.date.getDate()}</p>
+                    <p style={{fontSize:9, color:'var(--text-3)'}}>{MESES_CORTOS[e.date.getMonth()]}</p>
+                  </div>
+                  <div style={{flex:1, minWidth:0}}>
+                    <div style={{display:'flex', alignItems:'center', gap:6, marginBottom:2}}>
+                      <p style={{fontSize:13, fontWeight:500, color:'var(--text-1)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{e.lotName}</p>
+                      {e.pendienteRaleo && <span style={{fontSize:9, fontWeight:700, color:'var(--amber)', background:'var(--amber)18', padding:'1px 5px', borderRadius:4, flexShrink:0}}>pendiente raleo</span>}
+                    </div>
+                    <p style={{fontSize:11, color:'var(--text-3)'}}>{e.variety} · {e.proyectado ? 'proyectado' : 'confirmado'}</p>
+                  </div>
+                  <div style={{textAlign:'right', flexShrink:0}}>
+                    <p style={{fontSize:17, fontWeight:700, color:'var(--stage-c)', fontFamily:'DM Mono, monospace'}}>{e.plants}</p>
+                    <p style={{fontSize:10, color:'var(--text-3)'}}>uds</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+
+      {totalTotal === 0 && (
+        <div style={{textAlign:'center', padding:'40px 20px'}}>
+          <div style={{width:56, height:56, borderRadius:16, background:'var(--bg-card-h)', display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 16px'}}>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth="1.8" strokeLinecap="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          </div>
+          <p style={{fontSize:15, fontWeight:600, color:'var(--text-1)', marginBottom:6}}>Sin cosechas proyectadas</p>
+          <p style={{fontSize:13, color:'var(--text-2)', lineHeight:1.6}}>Los lotes en etapa de raleo aparecerán aquí con sus fechas estimadas de cosecha.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function HistorialScreen({ lots }) {
   // Incluye lotes cosechados completos Y lotes con cosechas parciales registradas
   const conCosechas = lots.filter(l => l.cosechas?.length > 0);
@@ -4894,9 +5063,9 @@ function DashboardScreen({ lots, onNavigate }) {
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
           Ver historial
         </button>
-        <button onClick={function() { onNavigate('sensores'); }} style={{flex:1, padding:'12px 0', borderRadius:12, border:'0.5px solid ' + CLR.border, background:CLR.bgCard, color:CLR.text2, fontSize:13, fontWeight:500, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:6}}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="15" x2="23" y2="15"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="15" x2="4" y2="15"/></svg>
-          Sensores
+        <button onClick={function() { onNavigate('produccion'); }} style={{flex:1, padding:'12px 0', borderRadius:12, border:'0.5px solid var(--stage-c)', background:'rgba(107,63,160,0.1)', color:'var(--stage-c)', fontSize:13, fontWeight:600, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:6}}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          Próximos 30 días
         </button>
       </div>
 
@@ -5890,6 +6059,7 @@ function App() {
     }} />;
     if (screen === 'notas') return <NotasScreen key="notas" lots={lots} />;
     if (screen === 'historial') return <HistorialScreen key="historial" lots={lots} />;
+    if (screen === 'produccion') return <ProduccionScreen key="produccion" lots={lots} onBack={() => handleNav('dashboard')} />;
     if (screen === 'dashboard') return <DashboardScreen key="dashboard" lots={lots} onNavigate={handleNav} />;
     if (screen === 'config') return <ConfigScreen key="config" session={session} darkMode={darkMode} onDarkMode={setDarkMode} onLogout={() => { fsAuth.clear(); try { localStorage.removeItem(LOTS_CACHE_KEY); } catch {} setSession(null); }} />;
     if (screen === 'sensores') return <SensoresScreen key="sensores" lots={lots} />;
