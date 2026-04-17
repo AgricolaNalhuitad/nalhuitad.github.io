@@ -2939,6 +2939,35 @@ function ZebraModal({ lot, onClose }) {
     </div>
   );
 }
+function ChildNameEditor({ childLot, cid, cidx, onRename }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(childLot?.name || cid);
+
+  const displayName = childLot?.name && childLot.name !== 'NaN' && childLot.name !== '01'
+    ? childLot.name
+    : ('Lote hijo ' + (cidx + 1));
+
+  if (editing) return (
+    <div style={{display:'flex', gap:5, alignItems:'center'}}>
+      <input autoFocus value={val} onChange={e => setVal(e.target.value)}
+        style={{flex:1, padding:'3px 8px', borderRadius:6, border:'0.5px solid var(--stage-t)', background:'var(--bg-card-h)', color:'var(--text-1)', fontSize:13, outline:'none'}} />
+      <button onClick={() => { onRename(val.trim() || displayName); setEditing(false); }}
+        style={{padding:'3px 10px', borderRadius:6, border:'none', background:'var(--stage-t)', color:'#fff', fontSize:11, fontWeight:700, cursor:'pointer'}}>OK</button>
+      <button onClick={() => setEditing(false)}
+        style={{background:'none', border:'none', color:'var(--text-3)', fontSize:13, cursor:'pointer'}}>✕</button>
+    </div>
+  );
+  return (
+    <div style={{display:'flex', alignItems:'center', gap:6}}>
+      <p style={{fontSize:13, fontWeight:600, color:'var(--text-1)'}}>{displayName}</p>
+      <button onClick={() => { setVal(displayName); setEditing(true); }}
+        style={{background:'none', border:'none', cursor:'pointer', padding:'1px 3px', display:'flex', alignItems:'center'}}>
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth="2.2" strokeLinecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+      </button>
+    </div>
+  );
+}
+
 function DetalleLote({ lot, lots, onBack, backLabel = 'Volver', onUpdate, onDelete, onSaveChild }) {
   const [editing, setEditing] = useState(false);
   const [showAvanzar, setShowAvanzar] = useState(false);
@@ -2954,7 +2983,7 @@ function DetalleLote({ lot, lots, onBack, backLabel = 'Volver', onUpdate, onDele
   };
   const [locs, setLocs] = useState(() => getLotLocs(lot));
   const [addingLoc, setAddingLoc] = useState(false);
-  const [newLoc, setNewLoc] = useState({ inv:'C', tipo:'piscina', id:'P01', cantidad:'' });
+  const [newLoc, setNewLoc] = useState({ inv:'C', tipo:'piscina', id:'P01', cantidad:'', fecha:todayISO() });
   const saveLocs = (updated) => {
     setLocs(updated);
     onUpdate({ ...lot, locations: updated, location: updated[0] ? { invernadero: updated[0].invernadero, tipo: updated[0].tipo, identificador: updated[0].identificador } : lot.location });
@@ -2966,7 +2995,8 @@ function DetalleLote({ lot, lots, onBack, backLabel = 'Volver', onUpdate, onDele
 
   const handleRaleoParcial = ({ cantidad, invDestino, ubicTipo, ubicId, densidad, fecha }) => {
     const childId = getNextChildId(lot.id, lot.childrenIds || []);
-    const childName = lot.name + ' — R' + (parseInt(childId.split('-').pop()) || 1);
+    const childNum = (lot.childrenIds || []).length + 1;
+    const childName = lot.name + ' · Raleo ' + childNum;
 
     // Crear lote hijo
     const childLot = {
@@ -2990,6 +3020,9 @@ function DetalleLote({ lot, lots, onBack, backLabel = 'Volver', onUpdate, onDele
         { stage: 'almacigo', date: lot.date, quantity: lot.quantity },
         { stage: 'raleo', date: fecha, quantity: cantidad, location: { invernadero: invDestino, tipo: ubicTipo, identificador: ubicId } }
       ],
+      parentName: lot.name,
+      parentDate: lot.date,
+      fechaRaleo: fecha,
       cosechas: [],
       notes: '',
     };
@@ -3300,6 +3333,11 @@ function DetalleLote({ lot, lots, onBack, backLabel = 'Volver', onUpdate, onDele
             <span style={{fontSize:13, color:'var(--text-3)'}}>
               {'Ubicaciones' + (locs.length > 0 ? ' · ' + locs.length : '')}
             </span>
+            {locs.length > 0 && (
+              <span style={{fontSize:11, color:'var(--stage-t)', fontWeight:600, fontFamily:'DM Mono, monospace'}}>
+                {locs.reduce((a,l)=>a+(parseInt(l.cantidad)||0),0).toLocaleString()} plantas totales
+              </span>
+            )}
           </div>
           {locs.length > 0 && (
             <div style={{background:'var(--bg-card-h)', borderRadius:10, overflow:'hidden', marginBottom:6}}>
@@ -3317,9 +3355,12 @@ function DetalleLote({ lot, lots, onBack, backLabel = 'Volver', onUpdate, onDele
                 const color = isNFT ? 'var(--stage-t)' : 'var(--text-2)';
                 return (
                   <div key={i} style={{display:'grid', gridTemplateColumns:'1fr 70px 42px 28px', gap:4, padding:'7px 10px', borderBottom: i < locs.length-1 ? '0.5px solid var(--sep)' : 'none', alignItems:'center'}}>
-                    <div style={{display:'flex', alignItems:'center', gap:5}}>
-                      <span style={{fontSize:11, color}}>{loc.invernadero + ' · ' + (loc.tipo||'').charAt(0).toUpperCase() + (loc.tipo||'').slice(1) + ' ' + (loc.identificador||'')}</span>
-                      {isNFT && <span style={{fontSize:8, fontWeight:700, color:'var(--stage-c)', background:'var(--stage-c)' + '18', padding:'1px 5px', borderRadius:3}}>NFT</span>}
+                    <div>
+                      <div style={{display:'flex', alignItems:'center', gap:5}}>
+                        <span style={{fontSize:11, color}}>{loc.invernadero + ' · ' + (loc.tipo||'').charAt(0).toUpperCase() + (loc.tipo||'').slice(1) + ' ' + (loc.identificador||'')}</span>
+                        {isNFT && <span style={{fontSize:8, fontWeight:700, color:'var(--stage-c)', background:'var(--stage-c)' + '18', padding:'1px 5px', borderRadius:3}}>NFT</span>}
+                      </div>
+                      {loc.fecha && <span style={{fontSize:9, color:'var(--text-3)'}}>{formatDate(loc.fecha)}</span>}
                     </div>
                     <span style={{fontSize:12, fontWeight:700, color:'var(--text-1)', textAlign:'right', fontFamily:'DM Mono, monospace'}}>{(parseInt(loc.cantidad)||0).toLocaleString()}</span>
                     <span style={{fontSize:11, color:'var(--text-3)', textAlign:'right'}}>{pct}%</span>
@@ -3349,16 +3390,20 @@ function DetalleLote({ lot, lots, onBack, backLabel = 'Volver', onUpdate, onDele
                   {(newLoc.tipo==='bancada'?['B01','B02','B03','B04','B05','B06','B07','B08']:['P01','P02','P03','P04','P05','P06','P07','P08']).map(id=><option key={id} value={id}>{id}</option>)}
                 </select>
               </div>
+              <div style={{display:'flex', gap:6, marginBottom:6}}>
+                <input type="date" value={newLoc.fecha} onChange={e => setNewLoc(f=>({...f, fecha:e.target.value}))}
+                  style={{flex:1, padding:'6px 10px', borderRadius:8, border:'0.5px solid var(--stage-t)', background:'var(--bg-card)', color:'var(--text-1)', fontSize:12, outline:'none'}} />
+              </div>
               <div style={{display:'flex', gap:6, alignItems:'center'}}>
                 <input type="number" inputMode="numeric" placeholder="Plantas en este lugar"
                   value={newLoc.cantidad} onChange={e => setNewLoc(f=>({...f, cantidad:e.target.value}))}
                   style={{flex:1, padding:'6px 10px', borderRadius:8, border:'0.5px solid var(--stage-t)', background:'var(--bg-card)', color:'var(--text-1)', fontSize:13, outline:'none'}} />
                 <button onClick={() => {
                   if (!newLoc.cantidad || isNaN(newLoc.cantidad)) return;
-                  const updated = [...locs, { invernadero:newLoc.inv, tipo:newLoc.tipo, identificador:newLoc.id, cantidad:parseInt(newLoc.cantidad) }];
+                  const updated = [...locs, { invernadero:newLoc.inv, tipo:newLoc.tipo, identificador:newLoc.id, cantidad:parseInt(newLoc.cantidad), fecha:newLoc.fecha }];
                   saveLocs(updated);
                   setAddingLoc(false);
-                  setNewLoc({ inv:'C', tipo:'piscina', id:'P01', cantidad:'' });
+                  setNewLoc({ inv:'C', tipo:'piscina', id:'P01', cantidad:'', fecha:todayISO() });
                 }} style={{padding:'6px 14px', borderRadius:8, border:'none', background:'var(--stage-t)', color:'#fff', fontSize:12, fontWeight:700, cursor:'pointer'}}>Agregar</button>
                 <button onClick={() => setAddingLoc(false)} style={{padding:'6px 10px', borderRadius:8, border:'none', background:'none', color:'var(--text-3)', fontSize:12, cursor:'pointer'}}>✕</button>
               </div>
@@ -3576,17 +3621,68 @@ function DetalleLote({ lot, lots, onBack, backLabel = 'Volver', onUpdate, onDele
       {/* Lotes hijos si los tiene */}
       {lot.childrenIds && lot.childrenIds.length > 0 && (
         <div style={{background:'var(--bg-card)', border:'0.5px solid var(--border)', borderRadius:12, padding:'12px 14px', marginBottom:12}}>
-          <p style={{fontSize:11, fontWeight:600, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:'.05em', marginBottom:8}}>Lotes hijos generados</p>
-          {lot.childrenIds.map(cid => (
-            <div key={cid} style={{display:'flex', alignItems:'center', gap:8, padding:'6px 0', borderTop:'0.5px solid var(--sep)'}}>
-              <div style={{width:6, height:6, borderRadius:'50%', background:'var(--stage-r)', flexShrink:0}} />
-              <p style={{fontSize:13, color:'var(--text-1)', fontFamily:'DM Mono, monospace', flex:1}}>{cid}</p>
-              <p style={{fontSize:11, color:'var(--text-3)'}}>Raleo</p>
-            </div>
-          ))}
+          <p style={{fontSize:11, fontWeight:600, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:'.05em', marginBottom:8}}>Lotes hijos · {lot.childrenIds.length}</p>
+          {lot.childrenIds.map((cid, cidx) => {
+            const childLot = lots.find(l => l.id === cid);
+            const raleo = (lot.raleos || []).find(r => r.lotHijoId === cid);
+            return (
+              <div key={cid} style={{padding:'8px 0', borderTop:'0.5px solid var(--sep)'}}>
+                <div style={{display:'flex', alignItems:'flex-start', gap:8}}>
+                  <div style={{width:6, height:6, borderRadius:'50%', background:'var(--stage-r)', flexShrink:0, marginTop:5}} />
+                  <div style={{flex:1, minWidth:0}}>
+                    {/* Nombre editable */}
+                    <ChildNameEditor
+                      childLot={childLot}
+                      cid={cid}
+                      cidx={cidx}
+                      onRename={(newName) => {
+                        if (childLot) onUpdate({...childLot, name: newName});
+                      }}
+                    />
+                    {/* Info del raleo */}
+                    <div style={{display:'flex', gap:10, flexWrap:'wrap', marginTop:3}}>
+                      {raleo?.fecha && (
+                        <span style={{fontSize:10, color:'var(--text-3)'}}>
+                          {'Raleo ' + formatDate(raleo.fecha)}
+                        </span>
+                      )}
+                      {raleo?.cantidadRaleada && (
+                        <span style={{fontSize:10, color:'var(--text-2)', fontWeight:600}}>
+                          {raleo.cantidadRaleada.toLocaleString() + ' plantas'}
+                        </span>
+                      )}
+                      {raleo?.destino && (
+                        <span style={{fontSize:10, color:'var(--stage-t)'}}>
+                          {'INV-' + raleo.destino.invernadero + ' · ' + (raleo.destino.tipo||'').toUpperCase() + ' ' + (raleo.destino.identificador||'')}
+                        </span>
+                      )}
+                      {childLot?.stage && (
+                        <span style={{fontSize:10, fontWeight:600, color: STAGES[childLot.stage]?.color || 'var(--text-3)'}}>
+                          {STAGES[childLot.stage]?.label || childLot.stage}
+                        </span>
+                      )}
+                    </div>
+                    <p style={{fontSize:9, color:'var(--text-3)', fontFamily:'DM Mono, monospace', marginTop:2}}>{cid}</p>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
           {lot.parentId && (
             <div style={{marginTop:8, paddingTop:8, borderTop:'0.5px solid var(--sep)'}}>
-              <p style={{fontSize:11, color:'var(--text-3)'}}>Padre: <span style={{color:'var(--text-2)', fontFamily:'DM Mono, monospace'}}>{lot.parentId}</span></p>
+              <p style={{fontSize:11, fontWeight:600, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:'.04em', marginBottom:5}}>Lote origen</p>
+              <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+                <div>
+                  <p style={{fontSize:13, fontWeight:600, color:'var(--text-1)'}}>{lot.parentName || lot.parentId}</p>
+                  <p style={{fontSize:11, color:'var(--text-3)', fontFamily:'DM Mono, monospace'}}>{lot.parentId}</p>
+                </div>
+                {lot.fechaRaleo && (
+                  <div style={{textAlign:'right'}}>
+                    <p style={{fontSize:10, color:'var(--text-3)'}}>Fecha raleo</p>
+                    <p style={{fontSize:12, fontWeight:600, color:'var(--text-2)'}}>{formatDate(lot.fechaRaleo)}</p>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -3708,7 +3804,7 @@ function AlertasScreen({ lots, onSelect }) {
 
   if (withAlerts.length === 0) {
     return (
-      <div style={{flex:1, overflowY:'auto', padding:16}}>
+      <div style={{flex:1, overflowY:'auto', padding:16, background:'var(--bg-1)', WebkitOverflowScrolling:'touch', overscrollBehavior:'contain'}}>
         <div className="dm-alert-ok" style={{
           background:'var(--bg-card-h)', borderRadius:14, padding:'16px 18px', marginBottom:20,
           display:'flex', alignItems:'center', gap:12
@@ -3728,7 +3824,7 @@ function AlertasScreen({ lots, onSelect }) {
   }
 
   return (
-    <div style={{flex:1, overflowY:'auto', padding:16}}>
+    <div style={{flex:1, overflowY:'auto', padding:16, background:'var(--bg-1)', WebkitOverflowScrolling:'touch', overscrollBehavior:'contain'}}>
       {withAlerts.length > 0 && (
         <>
           <p style={{fontSize:12, fontWeight:600, letterSpacing:'0.06em', color:'var(--red)', textTransform:'uppercase', marginBottom:12}}>
