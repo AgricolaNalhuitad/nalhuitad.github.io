@@ -2791,16 +2791,26 @@ function RaleoParcialModal({ lot, onClose, onConfirm }) {
 
 // ── ZEBRA QR + PRINTING ───────────────────────────────
 function buildQRString(lot) {
-  const inv   = lot.location?.invernadero || 'NA';
-  const tipo  = lot.location?.tipo === 'bancada' ? 'BAN' : lot.location?.tipo === 'piscina' ? 'PIS' : 'GEN';
-  const ident = lot.location?.identificador || 'XX';
-  const loc   = inv + '_' + tipo + '_' + ident;
+  // Ubicación: usar primera de locations[] o location legacy
+  const locs = lot.locations && lot.locations.length > 0 ? lot.locations : (lot.location ? [{ invernadero: lot.location.invernadero, tipo: lot.location.tipo, identificador: lot.location.identificador }] : []);
+  const firstLoc = locs[0] || {};
+  const inv   = firstLoc.invernadero || 'NA';
+  const tipo  = firstLoc.tipo === 'bancada' ? 'BAN' : firstLoc.tipo === 'piscina' ? 'PIS' : 'GEN';
+  const ident = firstLoc.identificador || 'XX';
+  const loc   = inv + '_' + tipo + '_' + ident + (locs.length > 1 ? '+' + (locs.length-1) : '');
   const stg   = (lot.stage || 'almacigo').toUpperCase().slice(0,8);
   const den   = lot.densidadSiembra || 0;
   const mor   = lot.mortalidadAcumulada || 0;
-  const tech  = lot.location?.invernadero === 'B' ? 'NFT' : lot.location?.invernadero === 'A' ? 'FLOAT' : 'SEED';
+  const tech  = inv === 'B' ? 'NFT' : inv === 'A' ? 'FLOAT' : 'SEED';
   const varCode = lot.varietyCode || 'OTR';
-  return 'ID:' + lot.id + '|VAR:' + varCode + '|LOC:' + loc + '|DATE:' + (lot.date || '') + '|STG:' + stg + '|DEN:' + den + '|MOR:' + mor + '|TECH:' + tech;
+  const qty   = lot.currentQuantity ?? toPlants(lot.quantity);
+  const pid   = lot.parentId ? '|PID:' + lot.parentId : '';
+  // O2 estimado basado en última temp del sensor
+  const tAgua = lot.sensorReadings?.tempAgua;
+  const o2str = tAgua != null ? '|O2:' + (14.62 * Math.exp(-0.0393 * tAgua)).toFixed(1) : '';
+  // URL directa — los scanners Android/iOS abren automáticamente si empieza con https://
+  const url = 'https://agricolanalhuitad.github.io/nalhuitad.github.io?lot=' + lot.id;
+  return url + '|VAR:' + varCode + '|LOC:' + loc + '|QTY:' + qty + '|DATE:' + (lot.date || '') + '|STG:' + stg + '|DEN:' + den + '|MOR:' + mor + '|TECH:' + tech + pid + o2str;
 }
 
 function buildCPCL(lot) {
@@ -4067,13 +4077,34 @@ function exportData(lots, format) {
   }
 
   // Excel con 4 hojas
+  // ── Hoja 5: Proyección 30 días ──
+  const hoy30 = new Date();
+  const fin30 = new Date(hoy30); fin30.setDate(fin30.getDate() + 30);
+  const proyRows = [];
+  lots.filter(l => l.stage === 'raleo').forEach(lot => {
+    projectHarvests(lot).forEach(h => {
+      if (h.date >= hoy30 && h.date <= fin30) {
+        proyRows.push({
+          'Semana':       'S' + (Math.floor((h.date - hoy30) / 604800000) + 1),
+          'Fecha':        h.date.toLocaleDateString('es-CL'),
+          'Lote':         h.lotName || '',
+          'ID_Lote':      h.lotId || '',
+          'Variedad':     h.variety || '',
+          'Cantidad':     h.plants || 0,
+          'Tipo':         'Proyectado',
+        });
+      }
+    });
+  });
+
   const wb = XLSX.utils.book_new();
   const wsLotes    = XLSX.utils.json_to_sheet(lotesRows.length    ? lotesRows    : [{}]);
   const wsEtapas   = XLSX.utils.json_to_sheet(etapasRows.length   ? etapasRows   : [{}]);
   const wsRaleos   = XLSX.utils.json_to_sheet(raleosRows.length   ? raleosRows   : [{}]);
   const wsCosechas = XLSX.utils.json_to_sheet(cosechasRows.length ? cosechasRows : [{}]);
+  const wsProyec   = XLSX.utils.json_to_sheet(proyRows.length     ? proyRows     : [{}]);
 
-  [wsLotes, wsEtapas, wsRaleos, wsCosechas].forEach(ws => {
+  [wsLotes, wsEtapas, wsRaleos, wsCosechas, wsProyec].forEach(ws => {
     ws['!cols'] = Array(25).fill({ wch: 20 });
   });
 
@@ -4081,6 +4112,7 @@ function exportData(lots, format) {
   XLSX.utils.book_append_sheet(wb, wsEtapas,   'Historial etapas');
   XLSX.utils.book_append_sheet(wb, wsRaleos,   'Raleos padre-hijo');
   XLSX.utils.book_append_sheet(wb, wsCosechas, 'Cosechas');
+  XLSX.utils.book_append_sheet(wb, wsProyec,   'Proyección 30 días');
   XLSX.writeFile(wb, 'Nalhuitad_v2_' + fecha + '.xlsx');
 }
 
@@ -5983,6 +6015,14 @@ async function checkLotAlerts(lots) {
 
 function App() {
   const [session, setSession] = useState(() => fsAuth.load());
+  // Leer ?lot=ID de la URL al abrir desde QR
+  const urlLotId = (() => {
+    try {
+      const id = new URLSearchParams(window.location.search).get('lot');
+      if (id) { try { sessionStorage.setItem('pendingLotId', id); } catch {} }
+      return id || sessionStorage.getItem('pendingLotId');
+    } catch { return null; }
+  })();
   const [screen, setScreen] = useState('lotes');
   const [prevScreen, setPrevScreen] = useState(null);
   const [lots, setLots] = useState(() => {
@@ -6049,6 +6089,11 @@ function App() {
       setLastSync(now);
       setIsFromCache(false);
       try { localStorage.setItem(LAST_SYNC_KEY, now.toISOString()); } catch {}
+      // Abrir lote directo si viene de QR (?lot=ID)
+      if (urlLotId && data.find(l => l.id === urlLotId)) {
+        setSelectedLot(urlLotId);
+        setScreen('lotes');
+      }
     } catch(e) {
       if (e.message === AUTH_EXPIRED_ERROR) { setSession(null); return; }
       if (!silent) setError(true);
@@ -6172,7 +6217,18 @@ function App() {
     sensores: 'Sensores',
   };
 
-  if (!session) return <LoginScreen onLogin={setSession} />;
+  if (!session) return <LoginScreen onLogin={(s) => {
+    setSession(s);
+    // Recuperar lote pendiente del QR si había uno
+    try {
+      const pending = sessionStorage.getItem('pendingLotId');
+      if (pending) {
+        setSelectedLot(pending);
+        setScreen('lotes');
+        sessionStorage.removeItem('pendingLotId');
+      }
+    } catch {}
+  }} />;
 
   if (loading) {
     return (
