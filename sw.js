@@ -1,5 +1,5 @@
-// Nalhuitad · Service Worker v1.0
-// Polling de notificaciones desde Firestore cada 2 minutos
+// Nalhuitad · Service Worker v1.1
+// Push handler para Web Push del servidor + polling Firestore como respaldo
 
 const FS_PROJECT = 'nalhuitad-d6758';
 const FS_KEY     = 'AIzaSyCHlsJDU0o7JsOvY4mgr5lVhiDOEok3C5w';
@@ -8,6 +8,29 @@ const NOTIF_SEEN_KEY = 'nalhuitad_notif_seen';
 
 self.addEventListener('install', e => { self.skipWaiting(); });
 self.addEventListener('activate', e => { e.waitUntil(clients.claim()); });
+
+// ── Push event — recibe notificaciones del servidor ──
+self.addEventListener('push', function(event) {
+  var data = {};
+  if (event.data) {
+    try { data = event.data.json(); } catch(e) {
+      // Fallback si el payload no es JSON
+      data = { title: 'Nalhuitad', body: event.data.text() || 'Nueva alerta' };
+    }
+  }
+
+  var title = data.title || 'Nalhuitad';
+  var options = {
+    body: data.body || '',
+    icon: data.icon || '/nalhuitad.github.io/icon-192.png',
+    badge: data.badge || '/nalhuitad.github.io/icon-192.png',
+    tag: data.tag || 'nalhuitad_push_' + Date.now(),
+    requireInteraction: data.requireInteraction || false,
+    data: data.data || { url: 'https://agricolanalhuitad.github.io/nalhuitad.github.io/' },
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
 
 // ── Helpers Firestore ────────────────────────────────
 function fromFSValue(v) {
