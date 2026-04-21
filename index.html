@@ -3876,6 +3876,11 @@ const AlertCard = React.memo(function AlertCard({ lot, alert, onSelect }) {
   const sepColor = isOverdue||isWarning ? accentHex+'22' : 'var(--sep)';
   const textColor = 'var(--text-1)';
   const text2Color = 'var(--text-2)';
+  const locs = lot.locations && lot.locations.length > 0
+    ? lot.locations
+    : lot.location?.invernadero
+      ? [{ invernadero: lot.location.invernadero, tipo: lot.location.tipo||'piscina', identificador: lot.location.identificador||'' }]
+      : [];
 
   return (
     <div onClick={handleClick} style={{
