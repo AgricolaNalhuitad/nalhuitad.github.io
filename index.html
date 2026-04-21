@@ -49,7 +49,7 @@ body input[type=date]{color:var(--text-1);color-scheme:auto}
 body.dark input[type=date]{color-scheme:dark}
 @keyframes spin{to{transform:rotate(360deg)}}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
-@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+@keyframes fadeIn{from{opacity:1;transform:translateY(0)}to{opacity:1;transform:translateY(0)}}
 @keyframes slideUp{from{opacity:0;transform:translateY(32px)}to{opacity:1;transform:translateY(0)}}
 @keyframes slideDown{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
 @keyframes toastIn{from{opacity:0;transform:translateX(-50%) translateY(-12px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
@@ -519,9 +519,13 @@ function getLotAlert(lot) {
   if (lot.stage === 'cosecha') return null;
   const expected = STAGE_DAYS[lot.stage];
   if (!expected) return null;
-  const stageEntry = lot.stageHistory[lot.stageHistory.length - 1];
+  const history = lot.stageHistory || [];
+  if (!history.length) return null;
+  const stageEntry = history[history.length - 1];
+  if (!stageEntry || !stageEntry.date) return null;
   const season = getSeason(stageEntry.date);
   const maxDays = expected[season];
+  if (!maxDays) return null;
   const days = daysSince(stageEntry.date);
   const remaining = maxDays - days;
   if (remaining < 0)  return { status:'overdue',  remaining, maxDays, days, season };
@@ -3802,7 +3806,7 @@ function AlertasScreen({ lots, onSelect }) {
 
   if (active.length === 0) {
     return (
-      <div style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:32, textAlign:'center'}}>
+      <div style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:32, textAlign:'center', background:'var(--bg-1)'}}>
         <div style={{width:60, height:60, borderRadius:16, background:'var(--bg-card-h)', display:'flex', alignItems:'center', justifyContent:'center', marginBottom:16}}>
           <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#276F50" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
         </div>
@@ -5225,6 +5229,401 @@ function SensorIcon({ type, color }) {
   return <svg {...s}><circle cx="12" cy="12" r="5"/></svg>;
 }
 
+
+// ══════════════════════════════════════════════════════════════
+//  CLÍNICA DE LA LECHUGA — Modal + Pantalla de diagnóstico
+// ══════════════════════════════════════════════════════════════
+
+const CLINICA_IMG_REF = {
+  bremia_enves: 'https://ipm.ucanr.edu/PMG/IMAGES/CROPS/LETTUCE/lettuce_downy-mildew2.jpg',
+  bremia_haz:   'https://ipm.ucanr.edu/PMG/IMAGES/CROPS/LETTUCE/lettuce_downy-mildew1.jpg',
+  pythium_raiz: 'https://extension.unh.edu/sites/default/files/migrated_unmanaged_files/Resource006049_Rep7680.jpg',
+  fe_intervenal:'https://ipm.ucanr.edu/PMG/IMAGES/CROPS/LETTUCE/lettuce_irondeficiency.jpg',
+  ca_tipburn:   'https://ipm.ucanr.edu/PMG/IMAGES/CROPS/LETTUCE/lettuce_tipburn.jpg',
+};
+
+const CLINICA_SYSTEM_PROMPT = `Eres el sistema de diagnóstico fitopatológico de Nalhuitad, una operación hidropónica comercial en Chonchi, Chiloé, Chile (42.6°S, HR 80-90%, clima templado oceánico lluvioso). CULTIVO: Lactuca sativa var. Milena. SISTEMAS: NFT (Inv B) y DWC (Inv A).
+
+BASE CIENTÍFICA: Resh 2013, INIA Chile Fichas Técnicas La Platina (Sepúlveda 2016 - Bremia lactucae), UC Davis IPM, Cornell University CEA (Mattson), FAO MIP Hortalizas, Plant Health Progress Diagnostic Guide Pythium 2024.
+
+PATÓGENOS CATALOGADOS PARA CHILOÉ:
+1. BREMIA LACTUCAE - Mildiu velloso [ALTA FRECUENCIA]. HR>85%, T°15-20°C. Síntomas haz: manchas cloróticas angulares limitadas por nervaduras. Síntomas envés: esporulación blanquecina-grisácea. Diferencial: micelio SOLO en envés, manchas limitadas por venas.
+2. PYTHIUM SPP. - Pudrición radicular [ALTA FRECUENCIA NFT/DWC]. T°agua>18°C, O2<6mg/L. Síntomas raíz: café-marrón, aspecto cola de rata, mucilaginoso. Síntomas foliares (avanzado): clorosis+marchitez. ACCIÓN INMEDIATA: aislar lote.
+3. DEFICIENCIA HIERRO - Clorosis intervenal hojas JÓVENES [MEDIA]. pH>6.5 inactiva quelatos. Nervaduras verdes, tejido intervenal amarillo, solo en hojas nuevas arriba.
+4. DEFICIENCIA CALCIO - Tip burn [MEDIA]. Necrosis bordes hojas INTERNAS del cogollo. No infeccioso.
+5. DEFICIENCIA MAGNESIO - Clorosis intervenal hojas VIEJAS [MEDIA]. Igual que Fe pero en hojas externas/inferiores.
+6. TOXICIDAD CE - Bordes café hojas EXTERNAS [VARIABLE]. Si EC>2.2 mS/cm.
+7. SCLEROTINIA - Pudrición blanca [BAJA]. Micelio blanco algodonoso + esclerocios negros.
+
+PROTOCOLO DE ANÁLISIS:
+1. Localizar área afectada (hoja joven/vieja, haz/envés, raíz)
+2. Describir síntomas exactos observados en la imagen
+3. Generar hipótesis con porcentaje de confianza
+4. Generar 2-3 preguntas de verificación visual
+5. Calcular dosis SOLO si operario confirma. Inv A DWC: 2000L. Inv B NFT: 2600L (2×1300L).
+
+REGLAS INNEGOCIABLES:
+- Si la planta se ve SANA (color verde uniforme, sin manchas, sin clorosis, raíces blancas): responder con alertaNivel "verde", diagnosticoPrincipal.nombre "Sin patología detectada", confianza según claridad de imagen. NO fabricar diagnósticos en plantas sanas.
+- NUNCA recomendar dosis sin confirmación del operario
+- Si Pythium → indicar AISLAMIENTO INMEDIATO antes del diagnóstico
+- Si confianza <60% → pedir nueva foto con instrucciones específicas
+- Todos los fungicidas deben estar registrados en SAG Chile para consumo fresco
+
+Responder SIEMPRE en JSON exacto:
+{"diagnosticoPrincipal":{"nombre":"...","agente":"...","confianza":85,"descripcionSintomas":"...","condicionesFavorables":"..."},"diagnosticoAlternativo":{"nombre":"...","agente":"...","confianza":30,"diferencial":"..."},"verificaciones":[{"pregunta":"...","respuestaEsperada":"sí","imagenRef":"url_imagen_referencia","siNoCoincide":"..."}],"protocolo":{"accionInmediata":"...","invAfectado":"B","tratamiento":{"producto":"...","principioActivo":"...","dosis_invA":"...","dosis_invB":"...","frecuencia":"...","registroSAG":true},"mip":["...","..."],"fuentes":["Resh 2013","INIA Ficha N°13"]},"alertaNivel":"verde|amarillo|rojo","confianzaSuficiente":true}
+
+Si imagen insuficiente: {"diagnosticoPrincipal":null,"solicitudImagen":{"motivo":"...","instrucciones":"..."}}`;
+
+function ClinicaScreen({ lots, onNav, preselectedLotId }) {
+  const [fase, setFase] = React.useState('inicio');
+  const [lotSelId, setLotSelId] = React.useState(preselectedLotId || '');
+  const [imgBase64, setImgBase64] = React.useState(null);
+  const [imgPreview, setImgPreview] = React.useState(null);
+  const [resultado, setResultado] = React.useState(null);
+  const [confirmaciones, setConfirmaciones] = React.useState({});
+  const [error, setError] = React.useState('');
+
+  const activeLots = lots.filter(l => l.stage !== 'cosecha');
+  const lotSel = activeLots.find(l => l.id === lotSelId);
+  const invLabel = lotSel?.location?.invernadero === 'B' ? 'NFT' : lotSel?.location?.invernadero === 'A' ? 'DWC' : '';
+
+  const handleFoto = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const full = ev.target.result;
+      setImgPreview(full);
+      setImgBase64(full.split(',')[1]);
+      setFase('preAnalisis');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const analizar = async () => {
+    if (!imgBase64) return;
+    setFase('analizando');
+    setError('');
+    const ctx = lotSel
+      ? ('Lote ' + lotSel.id + ' (' + (lotSel.variety||'Milena') + ') en Invernadero ' + (lotSel.location?.invernadero||'?') + ' ' + invLabel + '. Etapa: ' + (lotSel.stage||'?') + '.')
+      : 'Lote no especificado. Analizar solo por síntomas visuales.';
+    try {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-opus-4-6',
+          max_tokens: 1500,
+          system: CLINICA_SYSTEM_PROMPT,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: imgBase64 } },
+              { type: 'text', text: 'Analiza esta imagen. ' + ctx + ' Responde SOLO en el formato JSON especificado.' }
+            ]
+          }]
+        })
+      });
+      const data = await res.json();
+      const txt = (data.content?.[0]?.text || '').replace(/```json|```/g,'').trim();
+      const parsed = JSON.parse(txt);
+      setResultado(parsed);
+      setFase(parsed.diagnosticoPrincipal ? 'resultado' : 'inicio');
+      if (parsed.solicitudImagen) { setError(parsed.solicitudImagen.instrucciones); setFase('inicio'); }
+    } catch(e) {
+      setError('Error al analizar. Verificá tu conexión e intentá de nuevo.');
+      setFase('preAnalisis');
+    }
+  };
+
+  const confirmarVerificacion = (idx, resp) => setConfirmaciones(prev => ({...prev, [idx]: resp}));
+  const todasConfirmadas = resultado?.verificaciones?.length > 0 &&
+    resultado.verificaciones.every((_, i) => confirmaciones[i] !== undefined);
+  const alertColor = resultado?.alertaNivel === 'rojo' ? 'var(--red)' :
+    resultado?.alertaNivel === 'amarillo' ? 'var(--amber)' : 'var(--green)';
+
+  const resetear = () => {
+    setFase('inicio'); setImgBase64(null); setImgPreview(null);
+    setResultado(null); setConfirmaciones({}); setError('');
+  };
+
+  return (
+    <div style={{flex:1, overflowY:'auto', background:'var(--bg-1)', WebkitOverflowScrolling:'touch', overscrollBehavior:'contain'}}>
+
+      {/* FASE: INICIO */}
+      {(fase === 'inicio' || fase === 'preAnalisis') && (
+        <div style={{padding:'16px 16px 80px'}}>
+          {/* Header */}
+          <div style={{marginBottom:18}}>
+            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:3}}>
+              <p style={{fontSize:20,fontWeight:700,color:'var(--text-1)'}}>Clínica de la lechuga</p>
+              <span style={{fontSize:12,fontWeight:700,color:'var(--amber)',background:'rgba(251,191,36,0.15)',padding:'2px 8px',borderRadius:4}}>BETA</span>
+            </div>
+            <p style={{fontSize:14,color:'var(--text-3)'}}>Diagnóstico fitopatológico asistido · Chiloé</p>
+          </div>
+
+          {/* Selector de lote */}
+          <div style={{background:'var(--bg-card)',border:'0.5px solid var(--border)',borderRadius:12,padding:'12px 14px',marginBottom:12}}>
+            <p style={{fontSize:13,fontWeight:700,color:'var(--text-3)',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:8}}>¿En qué lote está la planta?</p>
+            <select value={lotSelId} onChange={e => setLotSelId(e.target.value)}
+              style={{width:'100%',padding:'10px 12px',borderRadius:8,border:'0.5px solid var(--border)',background:'var(--bg-card-h)',color: lotSelId ? 'var(--text-1)' : 'var(--text-3)',fontSize:14,outline:'none'}}>
+              <option value="">— Sin especificar (solo diagnóstico visual)</option>
+              {activeLots.map(l => (
+                <option key={l.id} value={l.id}>
+                  {l.name} · {l.location?.invernadero ? 'Inv ' + l.location.invernadero : ''} {l.location?.identificador||''} ({l.stage})
+                </option>
+              ))}
+            </select>
+            {lotSel && (
+              <div style={{marginTop:8,display:'flex',gap:6,flexWrap:'wrap'}}>
+                <span style={{fontSize:13,color:'var(--stage-t)',background:'rgba(33,113,181,0.15)',padding:'2px 8px',borderRadius:4}}>
+                  {invLabel}
+                </span>
+                <span style={{fontSize:13,color:'var(--text-3)',background:'var(--bg-card-h)',padding:'2px 8px',borderRadius:4}}>
+                  {(lotSel.currentQuantity || 0).toLocaleString()} plantas
+                </span>
+                <span style={{fontSize:13,color:'var(--text-3)',background:'var(--bg-card-h)',padding:'2px 8px',borderRadius:4}}>
+                  Etapa: {lotSel.stage}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Botón cámara */}
+          <label style={{display:'block',cursor:'pointer',marginBottom:12}}>
+            <input type="file" accept="image/*" capture="environment" onChange={handleFoto} style={{display:'none'}} />
+            <div style={{background:'var(--bg-card)',border: imgPreview ? '0.5px solid var(--border)' : '1.5px dashed var(--border)',borderRadius:14,padding:imgPreview?'8px':'24px 16px',textAlign:'center'}}>
+              {imgPreview ? (
+                <>
+                  <img src={imgPreview} style={{width:'100%',maxHeight:200,objectFit:'cover',borderRadius:10,marginBottom:6}} />
+                  <p style={{fontSize:13,color:'var(--stage-t)'}}>Tocá para cambiar la foto</p>
+                </>
+              ) : (
+                <>
+                  <div style={{width:44,height:44,borderRadius:12,background:'var(--bg-card-h)',display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 10px'}}>
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth="1.8" strokeLinecap="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                  </div>
+                  <p style={{fontSize:15,fontWeight:500,color:'var(--text-2)',marginBottom:3}}>Fotografiar planta afectada</p>
+                  <p style={{fontSize:13,color:'var(--text-3)'}}>Tocá para abrir la cámara · Mínimo 10cm</p>
+                </>
+              )}
+            </div>
+          </label>
+
+          {error && (
+            <div style={{background:'rgba(251,191,36,0.1)',border:'0.5px solid rgba(251,191,36,0.4)',borderRadius:8,padding:'8px 12px',marginBottom:10}}>
+              <p style={{fontSize:14,color:'var(--amber)'}}>{error}</p>
+            </div>
+          )}
+
+          {fase === 'preAnalisis' && imgBase64 && (
+            <button onClick={analizar} style={{width:'100%',padding:'13px 0',borderRadius:12,border:'none',background:'var(--stage-r)',color:'#fff',fontSize:15,fontWeight:700,cursor:'pointer',marginBottom:10}}>
+              Analizar imagen
+            </button>
+          )}
+
+          {/* Patógenos frecuentes */}
+          <p style={{fontSize:13,fontWeight:700,color:'var(--text-3)',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:8,marginTop:4}}>Patógenos frecuentes en Chiloé</p>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:14}}>
+            {[
+              ['Bremia lactucae','Mildiu velloso','Alta','#F87171','rgba(248,113,113,0.12)'],
+              ['Pythium spp.','Raíz blanda','Alta NFT','#F87171','rgba(248,113,113,0.12)'],
+              ['Def. Hierro','Clorosis hoja joven','Media','#FBBF24','rgba(251,191,36,0.12)'],
+              ['Def. Calcio','Tip burn cogollo','Media','#FBBF24','rgba(251,191,36,0.12)'],
+              ['Def. Magnesio','Clorosis hoja vieja','Baja-Media','#4ADE80','rgba(74,222,128,0.1)'],
+              ['Toxicidad EC','Bordes café ext.','Variable','#4ADE80','rgba(74,222,128,0.1)'],
+            ].map(([nombre, tipo, frec, color, bg]) => (
+              <div key={nombre} style={{background:'var(--bg-card)',border:'0.5px solid var(--border)',borderRadius:10,padding:'9px 11px'}}>
+                <p style={{fontSize:13,fontWeight:600,color:'var(--text-1)',marginBottom:2}}>{nombre}</p>
+                <p style={{fontSize:13,color:'var(--text-3)',marginBottom:4}}>{tipo}</p>
+                <span style={{fontSize:12,fontWeight:700,padding:'1px 6px',borderRadius:3,background:bg,color:color}}>{frec}</span>
+              </div>
+            ))}
+          </div>
+
+          <div style={{background:'var(--bg-card)',borderRadius:10,padding:'10px 12px',display:'flex',gap:8,alignItems:'flex-start'}}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth="2" strokeLinecap="round" style={{flexShrink:0,marginTop:1}}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <p style={{fontSize:13,color:'var(--text-3)',lineHeight:1.5}}>El análisis es asistido por IA. Siempre se requiere confirmación del operario antes de aplicar cualquier tratamiento. Fuentes: INIA Chile · Resh 2013 · UC Davis IPM · Cornell CEA.</p>
+          </div>
+        </div>
+      )}
+
+      {/* FASE: ANALIZANDO */}
+      {fase === 'analizando' && (
+        <div style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:'60px 20px',minHeight:400}}>
+          <div style={{width:60,height:60,borderRadius:18,background:'var(--bg-card)',display:'flex',alignItems:'center',justifyContent:'center',marginBottom:18}}>
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--stage-r)" strokeWidth="1.8" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          </div>
+          <p style={{fontSize:16,fontWeight:600,color:'var(--text-1)',marginBottom:6}}>Analizando imagen...</p>
+          <p style={{fontSize:14,color:'var(--text-3)',textAlign:'center',lineHeight:1.6}}>Consultando base científica · INIA · Resh · UC Davis</p>
+        </div>
+      )}
+
+      {/* FASE: RESULTADO */}
+      {fase === 'resultado' && resultado?.diagnosticoPrincipal && (
+        <div style={{padding:'16px 16px 80px'}}>
+          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:16}}>
+            <button onClick={resetear} style={{background:'none',border:'none',color:'var(--stage-t)',cursor:'pointer',padding:0,display:'flex',alignItems:'center',gap:4,fontSize:14}}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M19 12H5M12 5l-7 7 7 7"/></svg>
+              Nueva foto
+            </button>
+            <p style={{flex:1,fontSize:15,fontWeight:700,color:'var(--text-1)',textAlign:'right'}}>Resultado del análisis</p>
+          </div>
+
+          <div style={{background: resultado.alertaNivel==='rojo'?'rgba(248,113,113,0.1)': resultado.alertaNivel==='amarillo'?'rgba(251,191,36,0.1)':'rgba(74,222,128,0.1)', border:'0.5px solid '+alertColor+'50', borderRadius:10, padding:'8px 12px', marginBottom:12, display:'flex', alignItems:'center', gap:8}}>
+            <div style={{width:8,height:8,borderRadius:'50%',background:alertColor,flexShrink:0}} />
+            <p style={{fontSize:14,fontWeight:600,color:alertColor}}>
+              {resultado.alertaNivel==='rojo'?'Alerta crítica — revisar inmediatamente': resultado.alertaNivel==='amarillo'?'Atención requerida':'Sin urgencia inmediata'}
+            </p>
+          </div>
+
+          {imgPreview && <img src={imgPreview} style={{width:'100%',maxHeight:160,objectFit:'cover',borderRadius:12,marginBottom:12}} />}
+
+          {lotSel && (
+            <div style={{background:'var(--bg-card)',border:'0.5px solid var(--border)',borderRadius:10,padding:'8px 12px',marginBottom:10,display:'flex',gap:8,alignItems:'center'}}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth="2" strokeLinecap="round"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/></svg>
+              <p style={{fontSize:14,color:'var(--text-2)'}}>{lotSel.name} · Inv {lotSel.location?.invernadero} {invLabel}</p>
+            </div>
+          )}
+
+          <div style={{background:'var(--bg-card)',border:'0.5px solid '+alertColor,borderRadius:14,padding:'12px 14px',marginBottom:10}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:8}}>
+              <div style={{flex:1,minWidth:0}}>
+                <p style={{fontSize:16,fontWeight:700,color:'var(--text-1)'}}>{resultado.diagnosticoPrincipal.nombre}</p>
+                <p style={{fontSize:13,color:'var(--text-3)',fontStyle:'italic'}}>{resultado.diagnosticoPrincipal.agente}</p>
+              </div>
+              <span style={{fontSize:14,fontWeight:700,padding:'3px 10px',borderRadius:6,background:alertColor+'20',color:alertColor,whiteSpace:'nowrap',marginLeft:8}}>
+                {resultado.diagnosticoPrincipal.confianza}%
+              </span>
+            </div>
+            <p style={{fontSize:14,color:'var(--text-2)',lineHeight:1.5,marginBottom:6}}>{resultado.diagnosticoPrincipal.descripcionSintomas}</p>
+            <p style={{fontSize:13,color:'var(--text-3)',fontStyle:'italic'}}>{resultado.diagnosticoPrincipal.condicionesFavorables}</p>
+          </div>
+
+          {resultado.diagnosticoAlternativo?.nombre && (
+            <div style={{background:'var(--bg-card)',border:'0.5px solid var(--border)',borderRadius:10,padding:'10px 12px',marginBottom:12}}>
+              <p style={{fontSize:13,color:'var(--text-3)',marginBottom:3}}>Diagnóstico alternativo</p>
+              <p style={{fontSize:14,fontWeight:500,color:'var(--text-2)'}}>{resultado.diagnosticoAlternativo.nombre} · {resultado.diagnosticoAlternativo.confianza}%</p>
+              <p style={{fontSize:13,color:'var(--text-3)',marginTop:3}}>{resultado.diagnosticoAlternativo.diferencial}</p>
+            </div>
+          )}
+
+          {resultado.verificaciones?.length > 0 && (
+            <div style={{background:'rgba(74,222,128,0.05)',border:'0.5px solid rgba(74,222,128,0.3)',borderRadius:12,padding:'12px 14px',marginBottom:12}}>
+              <p style={{fontSize:13,fontWeight:700,color:'var(--green)',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:10}}>Verificar antes de continuar</p>
+              {resultado.verificaciones.map((v, i) => (
+                <div key={i} style={{marginBottom:10,paddingBottom:10,borderBottom: i<resultado.verificaciones.length-1?'0.5px solid var(--sep)':'none'}}>
+                  <p style={{fontSize:14,color:'var(--text-1)',marginBottom:6,fontWeight:500}}>{v.pregunta}</p>
+                  {CLINICA_IMG_REF[v.imagenRef] && (
+                    <div style={{marginBottom:6}}>
+                      <img src={CLINICA_IMG_REF[v.imagenRef]} style={{width:'100%',maxHeight:100,objectFit:'cover',borderRadius:8,border:'0.5px solid var(--border)'}} onError={e=>e.target.style.display='none'} />
+                      <p style={{fontSize:12,color:'var(--text-3)',marginTop:2}}>Imagen de referencia · UC Davis IPM</p>
+                    </div>
+                  )}
+                  <div style={{display:'flex',gap:6}}>
+                    <button onClick={() => confirmarVerificacion(i,'si')} style={{flex:1,padding:'7px 0',borderRadius:8,border:'0.5px solid',borderColor:confirmaciones[i]==='si'?'var(--green)':'var(--border)',background:confirmaciones[i]==='si'?'rgba(74,222,128,0.15)':'none',color:confirmaciones[i]==='si'?'var(--green)':'var(--text-3)',fontSize:14,fontWeight:600,cursor:'pointer'}}>Sí</button>
+                    <button onClick={() => confirmarVerificacion(i,'no')} style={{flex:1,padding:'7px 0',borderRadius:8,border:'0.5px solid',borderColor:confirmaciones[i]==='no'?'var(--red)':'var(--border)',background:confirmaciones[i]==='no'?'rgba(248,113,113,0.1)':'none',color:confirmaciones[i]==='no'?'var(--red)':'var(--text-3)',fontSize:14,fontWeight:600,cursor:'pointer'}}>No</button>
+                  </div>
+                  {confirmaciones[i]==='no' && v.siNoCoincide && (
+                    <p style={{fontSize:13,color:'var(--amber)',marginTop:5}}>→ {v.siNoCoincide}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          <button onClick={() => setFase('protocolo')} disabled={!todasConfirmadas}
+            style={{width:'100%',padding:'13px 0',borderRadius:12,border:'none',background:todasConfirmadas?'var(--stage-r)':'var(--bg-card-h)',color:todasConfirmadas?'#fff':'var(--text-3)',fontSize:15,fontWeight:700,cursor:todasConfirmadas?'pointer':'default',marginBottom:8}}>
+            Ver protocolo de tratamiento
+          </button>
+        </div>
+      )}
+
+      {/* FASE: PROTOCOLO */}
+      {fase === 'protocolo' && resultado?.protocolo && (
+        <div style={{padding:'16px 16px 80px'}}>
+          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:16}}>
+            <button onClick={() => setFase('resultado')} style={{background:'none',border:'none',color:'var(--stage-t)',cursor:'pointer',padding:0,display:'flex',alignItems:'center',gap:4,fontSize:14}}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M19 12H5M12 5l-7 7 7 7"/></svg>
+              Resultado
+            </button>
+            <p style={{flex:1,fontSize:15,fontWeight:700,color:'var(--text-1)',textAlign:'right'}}>Protocolo de tratamiento</p>
+          </div>
+
+          <div style={{background:'rgba(74,222,128,0.1)',border:'0.5px solid rgba(74,222,128,0.3)',borderRadius:10,padding:'8px 12px',display:'flex',gap:8,alignItems:'center',marginBottom:14}}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--green)" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+            <p style={{fontSize:14,fontWeight:600,color:'var(--green)'}}>Diagnóstico confirmado: {resultado.diagnosticoPrincipal?.nombre}</p>
+          </div>
+
+          {resultado.protocolo.accionInmediata && (
+            <div style={{background:'rgba(248,113,113,0.1)',border:'0.5px solid rgba(248,113,113,0.4)',borderRadius:10,padding:'10px 12px',marginBottom:12}}>
+              <p style={{fontSize:13,fontWeight:700,color:'var(--red)',textTransform:'uppercase',letterSpacing:'.04em',marginBottom:3}}>Acción inmediata</p>
+              <p style={{fontSize:14,color:'var(--text-1)'}}>{resultado.protocolo.accionInmediata}</p>
+            </div>
+          )}
+
+          {resultado.protocolo.tratamiento && (
+            <div style={{background:'var(--bg-card)',border:'0.5px solid var(--border)',borderRadius:12,padding:'12px 14px',marginBottom:10}}>
+              <p style={{fontSize:13,fontWeight:700,color:'var(--text-3)',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:8}}>Dosis calculadas para Nalhuitad</p>
+              <p style={{fontSize:15,fontWeight:600,color:'var(--text-1)',marginBottom:2}}>{resultado.protocolo.tratamiento.producto}</p>
+              <p style={{fontSize:13,color:'var(--text-3)',marginBottom:8,fontStyle:'italic'}}>{resultado.protocolo.tratamiento.principioActivo}</p>
+              {resultado.protocolo.tratamiento.dosis_invA && (
+                <div style={{display:'flex',justifyContent:'space-between',padding:'6px 0',borderBottom:'0.5px solid var(--sep)'}}>
+                  <span style={{fontSize:14,color:'var(--text-2)'}}>Inv A (DWC · 2.000L)</span>
+                  <span style={{fontSize:14,fontWeight:700,color:'var(--text-1)',fontFamily:'monospace'}}>{resultado.protocolo.tratamiento.dosis_invA}</span>
+                </div>
+              )}
+              {resultado.protocolo.tratamiento.dosis_invB && (
+                <div style={{display:'flex',justifyContent:'space-between',padding:'6px 0',borderBottom:'0.5px solid var(--sep)'}}>
+                  <span style={{fontSize:14,color:'var(--text-2)'}}>Inv B (NFT · 2.600L)</span>
+                  <span style={{fontSize:14,fontWeight:700,color:'var(--text-1)',fontFamily:'monospace'}}>{resultado.protocolo.tratamiento.dosis_invB}</span>
+                </div>
+              )}
+              <div style={{display:'flex',justifyContent:'space-between',padding:'6px 0'}}>
+                <span style={{fontSize:14,color:'var(--text-2)'}}>Frecuencia</span>
+                <span style={{fontSize:14,fontWeight:600,color:'var(--text-1)'}}>{resultado.protocolo.tratamiento.frecuencia}</span>
+              </div>
+              {resultado.protocolo.tratamiento.registroSAG && (
+                <div style={{marginTop:6,padding:'4px 8px',background:'rgba(74,222,128,0.1)',borderRadius:6,display:'inline-flex',gap:4,alignItems:'center'}}>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--green)" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+                  <span style={{fontSize:13,color:'var(--green)',fontWeight:600}}>Registrado SAG Chile</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {resultado.protocolo.mip?.length > 0 && (
+            <div style={{background:'var(--bg-card)',border:'0.5px solid var(--border)',borderRadius:12,padding:'12px 14px',marginBottom:10}}>
+              <p style={{fontSize:13,fontWeight:700,color:'var(--text-3)',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:8}}>Manejo integrado (MIP)</p>
+              {resultado.protocolo.mip.map((m, i) => (
+                <div key={i} style={{display:'flex',gap:8,alignItems:'flex-start',marginBottom:6}}>
+                  <div style={{width:18,height:18,borderRadius:'50%',background:'var(--bg-card-h)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                    <span style={{fontSize:12,fontWeight:700,color:'var(--text-3)'}}>{i+1}</span>
+                  </div>
+                  <p style={{fontSize:13,color:'var(--text-2)',lineHeight:1.4}}>{m}</p>
+                </div>
+              ))}
+              {resultado.protocolo.fuentes && (
+                <p style={{fontSize:12,color:'var(--stage-t)',marginTop:8,paddingTop:8,borderTop:'0.5px solid var(--sep)'}}>
+                  {resultado.protocolo.fuentes.join(' · ')}
+                </p>
+              )}
+            </div>
+          )}
+
+          <div style={{background:'rgba(251,191,36,0.08)',border:'0.5px solid rgba(251,191,36,0.3)',borderRadius:10,padding:'8px 12px',marginBottom:14}}>
+            <p style={{fontSize:13,color:'var(--amber)',lineHeight:1.5}}>Verificar que los productos estén registrados SAG Chile para cultivos de consumo fresco antes de aplicar.</p>
+          </div>
+
+          <button onClick={resetear} style={{width:'100%',padding:'13px 0',borderRadius:12,border:'none',background:'var(--green)',color:'#fff',fontSize:15,fontWeight:700,cursor:'pointer'}}>
+            Nuevo análisis
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SensoresScreen({ lots }) {
   const dm = useDarkMode();
 
@@ -5614,7 +6013,7 @@ const NAV = [
   { id:'lotes',     label:'Lotes',     icon: LotesIcon },
   { id:'dashboard', label:'Dashboard', icon: DashboardIcon },
   { id:'nuevo',     label:'Nuevo',     icon: NuevoIcon },
-  { id:'notas',     label:'Notas',     icon: NotasIcon },
+  { id:'clinica',   label:'Clínica',   icon: ClinicaIcon },
   { id:'config',    label:'Config',    icon: ConfigIcon },
 ];
 
@@ -5629,6 +6028,9 @@ function NuevoIcon({ active }) {
 }
 function NotasIcon({ active }) {
   return <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active?2.2:1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>;
+}
+function ClinicaIcon({ active }) {
+  return <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active?2.2:1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>;
 }
 function ConfigIcon({ active }) {
   return <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active?2.2:1.8} strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>;
@@ -6199,6 +6601,7 @@ function App() {
       setScreen('lotes');
     }} />;
     if (screen === 'notas') return <NotasScreen key="notas" lots={lots} />;
+    if (screen === 'clinica') return <ClinicaScreen key="clinica" lots={lots} onNav={handleNav} preselectedLotId={urlLotId || selectedLot} />;
     if (screen === 'historial') return <HistorialScreen key="historial" lots={lots} />;
     if (screen === 'produccion') return <ProduccionScreen key="produccion" lots={lots} onBack={() => handleNav('dashboard')} />;
     if (screen === 'dashboard') return <DashboardScreen key="dashboard" lots={lots} onNavigate={handleNav} />;
@@ -6440,12 +6843,24 @@ function App() {
       )}
 
       <div style={{flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minHeight:0, background:'var(--bg-1)'}}>
-        <div key={screen + (selectedLot||'')} className="fade-in" style={{flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minHeight:0, background:'var(--bg-1)'}}>
+        <div key={screen + (selectedLot||'')} style={{flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minHeight:0, background:'var(--bg-1)'}}>
           {renderMain()}
         </div>
       </div>
 
       <NavBar active={screen} onChange={handleNav} alertCount={alertCount} />
+      {/* FAB Notas */}
+      {screen !== 'notas' && screen !== 'nuevo' && (
+        <button onClick={() => handleNav('notas')} style={{
+          position:'fixed', bottom:80, right:16, zIndex:90,
+          width:48, height:48, borderRadius:'50%',
+          background:'var(--bg-card)', border:'0.5px solid var(--border)',
+          display:'flex', alignItems:'center', justifyContent:'center',
+          cursor:'pointer', boxShadow:'0 2px 8px rgba(0,0,0,0.3)'
+        }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-2)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>
+        </button>
+      )}
     </div>
     </DarkContext.Provider>
   );
