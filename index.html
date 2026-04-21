@@ -4656,13 +4656,14 @@ function loadConfig() {
       plantsPer: 135,
       darkMode: false,
       nombre: '',
+      clinicaApiKey: '',
       stageDays: {
         almacigo:    { verano:28, otono:32, invierno:35, primavera:30 },
         transplante: { verano:15, otono:15, invierno:15, primavera:15 },
         raleo:       { verano:22, otono:35, invierno:50, primavera:28 },
       }
     };
-  } catch { return { plantsPer:135, darkMode:false, nombre:'', stageDays:{ almacigo:{verano:28,otono:32,invierno:35,primavera:30}, transplante:{verano:15,otono:15,invierno:15,primavera:15}, raleo:{verano:22,otono:35,invierno:50,primavera:28} } }; }
+  } catch { return { plantsPer:135, darkMode:false, nombre:'', clinicaApiKey:'', stageDays:{ almacigo:{verano:28,otono:32,invierno:35,primavera:30}, transplante:{verano:15,otono:15,invierno:15,primavera:15}, raleo:{verano:22,otono:35,invierno:50,primavera:28} } }; }
 }
 
 function saveConfig(cfg) {
@@ -4751,6 +4752,7 @@ function ConfigScreen({ session, onLogout, darkMode, onDarkMode }) {
   const [cfg, setCfg] = useState(() => loadConfig());
   const [activeStage, setActiveStage] = useState('almacigo');
   const [saved, setSaved] = useState(false);
+  const [showKey, setShowKey] = useState(false);
 
   const update = (path, val) => {
     setCfg(prev => {
@@ -4822,6 +4824,36 @@ function ConfigScreen({ session, onLogout, darkMode, onDarkMode }) {
             onChange={e => update('nombre', e.target.value)}
             style={{width:110, padding:'7px 10px', borderRadius:8, border:'0.5px solid var(--border)', background:'var(--bg-card-h)', color:'var(--text-1)', fontSize:14, fontFamily:'-apple-system,BlinkMacSystemFont,\'Segoe UI\',system-ui,sans-serif', outline:'none', textAlign:'right'}}
           />
+        </div>
+      </div>
+
+      {/* Clínica IA */}
+      <p style={{fontSize:12, fontWeight:600, letterSpacing:'0.06em', color:'var(--text-2)', textTransform:'uppercase', marginBottom:12}}>Clínica IA</p>
+      <div style={{background:'var(--bg-card)', border:'0.5px solid var(--border)', borderRadius:14, overflow:'hidden', marginBottom:20}}>
+        <div style={{padding:'14px 16px'}}>
+          <p style={{fontSize:14, fontWeight:500, color:'var(--text-1)', marginBottom:2}}>API Key Anthropic</p>
+          <p style={{fontSize:12, color:'var(--text-2)', marginBottom:8}}>Requerida para el análisis de imágenes · Solo se guarda en este dispositivo</p>
+          <div style={{display:'flex', gap:6}}>
+            <input
+              id="cfg-apikey" name="cfg-apikey"
+              type={showKey ? 'text' : 'password'}
+              placeholder="sk-ant-api03-..."
+              value={cfg.clinicaApiKey || ''}
+              onChange={e => update('clinicaApiKey', e.target.value)}
+              style={{flex:1, padding:'8px 10px', borderRadius:8, border:'0.5px solid var(--border)', background:'var(--bg-card-h)', color:'var(--text-1)', fontSize:13, fontFamily:'monospace', outline:'none'}}
+            />
+            <button onClick={() => setShowKey(!showKey)}
+              style={{padding:'8px 10px', borderRadius:8, border:'0.5px solid var(--border)', background:'var(--bg-card-h)', color:'var(--text-2)', cursor:'pointer', flexShrink:0}}>
+              {showKey
+                ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+              }
+            </button>
+          </div>
+          {cfg.clinicaApiKey
+            ? <p style={{fontSize:12, color:'var(--green)', marginTop:6}}>Clave configurada</p>
+            : <p style={{fontSize:12, color:'var(--amber)', marginTop:6}}>Sin clave — Clínica IA no disponible</p>
+          }
         </div>
       </div>
 
@@ -5307,6 +5339,11 @@ function ClinicaScreen({ lots, onNav, preselectedLotId }) {
 
   const analizar = async () => {
     if (!imgBase64) return;
+    const apiKey = loadConfig().clinicaApiKey || '';
+    if (!apiKey) {
+      setError('Configurá tu API Key de Anthropic en Config → Clínica IA para usar esta función.');
+      return;
+    }
     setFase('analizando');
     setError('');
     const ctx = lotSel
@@ -5315,7 +5352,12 @@ function ClinicaScreen({ lots, onNav, preselectedLotId }) {
     try {
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
         body: JSON.stringify({
           model: 'claude-opus-4-6',
           max_tokens: 1500,
@@ -5329,6 +5371,11 @@ function ClinicaScreen({ lots, onNav, preselectedLotId }) {
           }]
         })
       });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        const msg = errBody?.error?.message || ('Error ' + res.status);
+        throw new Error(msg);
+      }
       const data = await res.json();
       const txt = (data.content?.[0]?.text || '').replace(/```json|```/g,'').trim();
       const parsed = JSON.parse(txt);
@@ -5336,7 +5383,7 @@ function ClinicaScreen({ lots, onNav, preselectedLotId }) {
       setFase(parsed.diagnosticoPrincipal ? 'resultado' : 'inicio');
       if (parsed.solicitudImagen) { setError(parsed.solicitudImagen.instrucciones); setFase('inicio'); }
     } catch(e) {
-      setError('Error al analizar. Verificá tu conexión e intentá de nuevo.');
+      setError('Error al analizar: ' + (e.message || 'Verificá tu conexión e intentá de nuevo.'));
       setFase('preAnalisis');
     }
   };
