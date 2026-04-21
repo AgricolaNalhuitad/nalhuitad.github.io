@@ -4832,7 +4832,7 @@ function ConfigScreen({ session, onLogout, darkMode, onDarkMode }) {
       <div style={{background:'var(--bg-card)', border:'0.5px solid var(--border)', borderRadius:14, overflow:'hidden', marginBottom:20}}>
         <div style={{padding:'14px 16px'}}>
           <p style={{fontSize:14, fontWeight:500, color:'var(--text-1)', marginBottom:2}}>API Key Anthropic</p>
-          <p style={{fontSize:12, color:'var(--text-2)', marginBottom:8}}>Requerida para el análisis de imágenes · Solo se guarda en este dispositivo</p>
+          <p style={{fontSize:12, color:'var(--text-2)', marginBottom:8}}>Requerida para análisis de imágenes · Solo se guarda en este dispositivo</p>
           <div style={{display:'flex', gap:6}}>
             <input
               id="cfg-apikey" name="cfg-apikey"
@@ -5314,8 +5314,7 @@ Si imagen insuficiente: {"diagnosticoPrincipal":null,"solicitudImagen":{"motivo"
 function ClinicaScreen({ lots, onNav, preselectedLotId }) {
   const [fase, setFase] = React.useState('inicio');
   const [lotSelId, setLotSelId] = React.useState(preselectedLotId || '');
-  const [imgBase64, setImgBase64] = React.useState(null);
-  const [imgPreview, setImgPreview] = React.useState(null);
+  const [imgs, setImgs] = React.useState([]); // [{base64, preview, mediaType}] máx 3
   const [resultado, setResultado] = React.useState(null);
   const [confirmaciones, setConfirmaciones] = React.useState({});
   const [error, setError] = React.useState('');
@@ -5324,21 +5323,28 @@ function ClinicaScreen({ lots, onNav, preselectedLotId }) {
   const lotSel = activeLots.find(l => l.id === lotSelId);
   const invLabel = lotSel?.location?.invernadero === 'B' ? 'NFT' : lotSel?.location?.invernadero === 'A' ? 'DWC' : '';
 
-  const handleFoto = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const full = ev.target.result;
-      setImgPreview(full);
-      setImgBase64(full.split(',')[1]);
-      setFase('preAnalisis');
-    };
-    reader.readAsDataURL(file);
+  const handleAddFotos = (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    const remaining = 3 - imgs.length;
+    const toProcess = files.slice(0, remaining);
+    let loaded = 0;
+    toProcess.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const full = ev.target.result;
+        const mediaType = full.startsWith('data:image/png') ? 'image/png' : full.startsWith('data:image/webp') ? 'image/webp' : 'image/jpeg';
+        setImgs(prev => prev.length < 3 ? [...prev, { base64: full.split(',')[1], preview: full, mediaType }] : prev);
+        loaded++;
+        if (loaded === toProcess.length) setFase('preAnalisis');
+      };
+      reader.readAsDataURL(file);
+    });
+    e.target.value = '';
   };
 
   const analizar = async () => {
-    if (!imgBase64) return;
+    if (!imgs.length) return;
     const apiKey = loadConfig().clinicaApiKey || '';
     if (!apiKey) {
       setError('Configurá tu API Key de Anthropic en Config → Clínica IA para usar esta función.');
@@ -5350,6 +5356,10 @@ function ClinicaScreen({ lots, onNav, preselectedLotId }) {
       ? ('Lote ' + lotSel.id + ' (' + (lotSel.variety||'Milena') + ') en Invernadero ' + (lotSel.location?.invernadero||'?') + ' ' + invLabel + '. Etapa: ' + (lotSel.stage||'?') + '.')
       : 'Lote no especificado. Analizar solo por síntomas visuales.';
     try {
+      const imgBlocks = imgs.map(img => ({ type: 'image', source: { type: 'base64', media_type: img.mediaType || 'image/jpeg', data: img.base64 } }));
+      const introText = imgs.length > 1
+        ? ('Se envían ' + imgs.length + ' ángulos de la misma planta afectada. ' + ctx + ' Analiza todas las imágenes en conjunto para dar un diagnóstico más preciso. Responde SOLO en el formato JSON especificado.')
+        : ('Analiza esta imagen. ' + ctx + ' Responde SOLO en el formato JSON especificado.');
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
@@ -5362,19 +5372,12 @@ function ClinicaScreen({ lots, onNav, preselectedLotId }) {
           model: 'claude-opus-4-6',
           max_tokens: 1500,
           system: CLINICA_SYSTEM_PROMPT,
-          messages: [{
-            role: 'user',
-            content: [
-              { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: imgBase64 } },
-              { type: 'text', text: 'Analiza esta imagen. ' + ctx + ' Responde SOLO en el formato JSON especificado.' }
-            ]
-          }]
+          messages: [{ role: 'user', content: [...imgBlocks, { type: 'text', text: introText }] }]
         })
       });
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({}));
-        const msg = errBody?.error?.message || ('Error ' + res.status);
-        throw new Error(msg);
+        throw new Error(errBody?.error?.message || ('Error ' + res.status));
       }
       const data = await res.json();
       const txt = (data.content?.[0]?.text || '').replace(/```json|```/g,'').trim();
@@ -5395,7 +5398,7 @@ function ClinicaScreen({ lots, onNav, preselectedLotId }) {
     resultado?.alertaNivel === 'amarillo' ? 'var(--amber)' : 'var(--green)';
 
   const resetear = () => {
-    setFase('inicio'); setImgBase64(null); setImgPreview(null);
+    setFase('inicio'); setImgs([]);
     setResultado(null); setConfirmaciones({}); setError('');
   };
 
@@ -5441,26 +5444,56 @@ function ClinicaScreen({ lots, onNav, preselectedLotId }) {
             )}
           </div>
 
-          {/* Botón cámara */}
-          <label style={{display:'block',cursor:'pointer',marginBottom:12}}>
-            <input type="file" accept="image/*" capture="environment" onChange={handleFoto} style={{display:'none'}} />
-            <div style={{background:'var(--bg-card)',border: imgPreview ? '0.5px solid var(--border)' : '1.5px dashed var(--border)',borderRadius:14,padding:imgPreview?'8px':'24px 16px',textAlign:'center'}}>
-              {imgPreview ? (
-                <>
-                  <img src={imgPreview} style={{width:'100%',maxHeight:200,objectFit:'cover',borderRadius:10,marginBottom:6}} />
-                  <p style={{fontSize:13,color:'var(--stage-t)'}}>Tocá para cambiar la foto</p>
-                </>
-              ) : (
-                <>
-                  <div style={{width:44,height:44,borderRadius:12,background:'var(--bg-card-h)',display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 10px'}}>
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth="1.8" strokeLinecap="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          {/* Fotos — cámara + galería, máx 3 */}
+          <input type="file" id="clinica-cam" accept="image/*" capture="environment" onChange={handleAddFotos} style={{display:'none'}} />
+          <input type="file" id="clinica-gal" accept="image/*" multiple onChange={handleAddFotos} style={{display:'none'}} />
+
+          {imgs.length > 0 ? (
+            <div style={{marginBottom:12}}>
+              <div style={{display:'flex',gap:8,marginBottom:6,flexWrap:'wrap'}}>
+                {imgs.map((img, i) => (
+                  <div key={i} style={{position:'relative',flex:'0 0 auto'}}>
+                    <img src={img.preview} style={{width:88,height:88,objectFit:'cover',borderRadius:10,border:'0.5px solid var(--border)',display:'block'}} />
+                    <button onClick={() => setImgs(prev => prev.filter((_,j) => j !== i))}
+                      style={{position:'absolute',top:-7,right:-7,width:22,height:22,borderRadius:'50%',background:'var(--red)',border:'2px solid var(--bg-1)',color:'#fff',fontSize:13,fontWeight:700,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',lineHeight:1,padding:0}}>
+                      ×
+                    </button>
                   </div>
-                  <p style={{fontSize:15,fontWeight:500,color:'var(--text-2)',marginBottom:3}}>Fotografiar planta afectada</p>
-                  <p style={{fontSize:13,color:'var(--text-3)'}}>Tocá para abrir la cámara · Mínimo 10cm</p>
-                </>
-              )}
+                ))}
+                {imgs.length < 3 && (
+                  <div style={{display:'flex',flexDirection:'column',gap:6,justifyContent:'center'}}>
+                    <label htmlFor="clinica-cam" style={{width:40,height:40,borderRadius:10,border:'1.5px dashed var(--border)',background:'var(--bg-card)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'}}>
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth="1.8" strokeLinecap="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                    </label>
+                    <label htmlFor="clinica-gal" style={{width:40,height:40,borderRadius:10,border:'1.5px dashed var(--border)',background:'var(--bg-card)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'}}>
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth="1.8" strokeLinecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                    </label>
+                  </div>
+                )}
+              </div>
+              <p style={{fontSize:12,color:'var(--text-3)'}}>{imgs.length}/3 fotos · Tocá × para eliminar</p>
             </div>
-          </label>
+          ) : (
+            <div style={{marginBottom:12}}>
+              <div style={{background:'var(--bg-card)',border:'1.5px dashed var(--border)',borderRadius:14,padding:'20px 12px',marginBottom:6}}>
+                <div style={{display:'flex',gap:10}}>
+                  <label htmlFor="clinica-cam" style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:8,cursor:'pointer',padding:'10px 8px',borderRadius:10,background:'var(--bg-card-h)'}}>
+                    <div style={{width:40,height:40,borderRadius:10,background:'var(--bg-card)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-2)" strokeWidth="1.8" strokeLinecap="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                    </div>
+                    <p style={{fontSize:13,fontWeight:500,color:'var(--text-2)',textAlign:'center',margin:0}}>Tomar foto</p>
+                  </label>
+                  <label htmlFor="clinica-gal" style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:8,cursor:'pointer',padding:'10px 8px',borderRadius:10,background:'var(--bg-card-h)'}}>
+                    <div style={{width:40,height:40,borderRadius:10,background:'var(--bg-card)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-2)" strokeWidth="1.8" strokeLinecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                    </div>
+                    <p style={{fontSize:13,fontWeight:500,color:'var(--text-2)',textAlign:'center',margin:0}}>Adjuntar</p>
+                  </label>
+                </div>
+              </div>
+              <p style={{fontSize:12,color:'var(--text-3)',textAlign:'center'}}>Hasta 3 fotos · Distintos ángulos mejoran el diagnóstico</p>
+            </div>
+          )}
 
           {error && (
             <div style={{background:'rgba(251,191,36,0.1)',border:'0.5px solid rgba(251,191,36,0.4)',borderRadius:8,padding:'8px 12px',marginBottom:10}}>
@@ -5468,9 +5501,9 @@ function ClinicaScreen({ lots, onNav, preselectedLotId }) {
             </div>
           )}
 
-          {fase === 'preAnalisis' && imgBase64 && (
+          {fase === 'preAnalisis' && imgs.length > 0 && (
             <button onClick={analizar} style={{width:'100%',padding:'13px 0',borderRadius:12,border:'none',background:'var(--stage-r)',color:'#fff',fontSize:15,fontWeight:700,cursor:'pointer',marginBottom:10}}>
-              Analizar imagen
+              {'Analizar ' + imgs.length + (imgs.length === 1 ? ' imagen' : ' imágenes')}
             </button>
           )}
 
@@ -5529,7 +5562,7 @@ function ClinicaScreen({ lots, onNav, preselectedLotId }) {
             </p>
           </div>
 
-          {imgPreview && <img src={imgPreview} style={{width:'100%',maxHeight:160,objectFit:'cover',borderRadius:12,marginBottom:12}} />}
+          {imgs[0] && <img src={imgs[0].preview} style={{width:'100%',maxHeight:160,objectFit:'cover',borderRadius:12,marginBottom:12}} />}
 
           {lotSel && (
             <div style={{background:'var(--bg-card)',border:'0.5px solid var(--border)',borderRadius:10,padding:'8px 12px',marginBottom:10,display:'flex',gap:8,alignItems:'center'}}>
