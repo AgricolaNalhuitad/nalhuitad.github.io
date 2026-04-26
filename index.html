@@ -6267,12 +6267,215 @@ function Toast({ msg, type, onDone }) {
 }
 
 // ── LOGIN SCREEN ──────────────────────────────────────
-function LoginScreen({ onLogin }) {
+// ══ SMOKE TEST ══════════════════════════════════════════════════
+function SmokeTestScreen({ onClose, lots, session }) {
+  const [results, setResults] = React.useState({});
+  const [running, setRunning] = React.useState(false);
+
+  const TESTS = [
+    { id:'auth_session', label:'Sesión activa', group:'Auth', run: async () => {
+      const s = fsAuth.load();
+      if (!s?.idToken) throw new Error('Sin sesión en localStorage');
+      if (!s?.email) throw new Error('Sin email en sesión');
+      return 'OK · ' + s.email;
+    }},
+    { id:'auth_token_fresh', label:'Token refresh', group:'Auth', run: async () => {
+      const token = await fsDb.getFreshToken();
+      if (!token) throw new Error('getFreshToken() devolvió null');
+      if (token.length < 100) throw new Error('Token sospechosamente corto');
+      return 'OK · ' + token.slice(0,16) + '...';
+    }},
+    { id:'firestore_read', label:'Lectura Firestore', group:'Firebase', run: async () => {
+      const token = await fsDb.getFreshToken();
+      const url = 'https://firestore.googleapis.com/v1/projects/' + FS_PROJECT + '/databases/(default)/documents/lots?pageSize=1';
+      const res = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      const count = data.documents?.length || 0;
+      return 'OK · ' + count + ' doc(s)';
+    }},
+    { id:'cache_lots', label:'Caché local (lotes)', group:'Firebase', run: async () => {
+      const raw = localStorage.getItem(LOTS_CACHE_KEY);
+      if (!raw) throw new Error('Caché vacío — sin sync previo');
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) throw new Error('Caché malformado');
+      return 'OK · ' + parsed.length + ' lote(s)';
+    }},
+    { id:'firestore_write', label:'Escritura Firestore', group:'Firebase', run: async () => {
+      const testId = 'smoke_' + Date.now();
+      await fsDb.set('smoke_tests', testId, { smokeTest: true, ts: new Date().toISOString() });
+      const read = await fsDb.get('smoke_tests', testId);
+      if (!read?.smokeTest) throw new Error('Escrito pero no leído');
+      const token = await fsDb.getFreshToken();
+      await fetch('https://firestore.googleapis.com/v1/projects/' + FS_PROJECT + '/databases/(default)/documents/smoke_tests/' + testId, { method:'DELETE', headers:{ Authorization:'Bearer '+token } });
+      return 'OK · write/read/delete';
+    }},
+    { id:'config_sync', label:'Config localStorage', group:'Config', run: async () => {
+      const cfg = loadConfig();
+      if (!cfg) throw new Error('loadConfig() null');
+      if (typeof cfg.plantsPer !== 'number') throw new Error('plantsPer inválido: ' + cfg.plantsPer);
+      if (!cfg.stageDays?.almacigo) throw new Error('stageDays.almacigo ausente');
+      return 'OK · plantsPer=' + cfg.plantsPer + ' darkMode=' + cfg.darkMode;
+    }},
+    { id:'lot_alert', label:'Motor alertas', group:'Lógica', run: async () => {
+      const d = new Date(); d.setDate(d.getDate() - 60);
+      const fakeLot = { id:'smoke', stage:'raleo', stageHistory:[{ stage:'raleo', date:d.toISOString().slice(0,10) }] };
+      const alert = getLotAlert(fakeLot);
+      if (!alert) throw new Error('getLotAlert devolvió null');
+      if (alert.status !== 'overdue') throw new Error('Esperado overdue, recibido: ' + alert.status);
+      return 'OK · ' + alert.remaining + ' días (overdue)';
+    }},
+    { id:'harvest_projection', label:'Proyección cosecha', group:'Lógica', run: async () => {
+      const today = todayISO();
+      const season = getSeason(today);
+      const daysLeft = (STAGE_DAYS.transplante[season]||15) + (STAGE_DAYS.raleo[season]||35);
+      if (!daysLeft || daysLeft < 1) throw new Error('daysLeft inválido: ' + daysLeft);
+      const d = new Date(); d.setDate(d.getDate() + daysLeft);
+      return 'OK · ' + daysLeft + ' días → ' + d.toLocaleDateString('es-CL');
+    }},
+    { id:'notes_cache', label:'Notas (caché)', group:'Notas', run: async () => {
+      const key = 'smoke_note_' + Date.now();
+      const existing = JSON.parse(localStorage.getItem(NOTES_CACHE_KEY) || '[]');
+      const testNote = { id:key, text:'smoke test', date:todayISO(), timestamp:new Date().toISOString(), lotId:null };
+      localStorage.setItem(NOTES_CACHE_KEY, JSON.stringify([testNote, ...existing].slice(0,50)));
+      const check = JSON.parse(localStorage.getItem(NOTES_CACHE_KEY) || '[]');
+      if (!check.find(n => n.id === key)) throw new Error('Nota no hallada tras escribir');
+      localStorage.setItem(NOTES_CACHE_KEY, JSON.stringify(existing));
+      return 'OK · ' + existing.length + ' nota(s) existentes';
+    }},
+    { id:'clinica_api', label:'API Clínica (CORS)', group:'Clínica', run: async () => {
+      const apiKey = loadConfig().clinicaApiKey || '';
+      if (!apiKey) return 'SKIP — API key no configurada';
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json', 'x-api-key':apiKey, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true' },
+        body: JSON.stringify({ model:'claude-opus-4-6', max_tokens:5, messages:[{ role:'user', content:'di ok' }] })
+      });
+      if (res.status === 401) throw new Error('API key inválida (401)');
+      if (res.status === 529) return 'API sobrecargada (529) — key OK';
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return 'OK · CORS headers correctos';
+    }},
+    { id:'telegram_bot', label:'Bot Telegram', group:'Alertas', run: async () => {
+      const res = await fetch('https://api.telegram.org/bot8644204912:AAEHYBZulW85ojhm6B1O-N8OKrXbIH_os8M/getMe');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      if (!data.ok) throw new Error(JSON.stringify(data));
+      return 'OK · @' + data.result.username;
+    }},
+    { id:'weather_api', label:'API Clima Open-Meteo', group:'Alertas', run: async () => {
+      const res = await fetch('https://api.open-meteo.com/v1/forecast?latitude=-42.524511&longitude=-73.801944&current_weather=true&forecast_days=1');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      if (!data.current_weather) throw new Error('Sin current_weather en respuesta');
+      const t = data.current_weather.temperature;
+      const w = data.current_weather.windspeed;
+      return 'OK · ' + t + '°C · viento ' + w + ' km/h';
+    }},
+  ];
+
+  const runTest = async (test) => {
+    setResults(prev => ({ ...prev, [test.id]: { status:'running' } }));
+    const t0 = Date.now();
+    try {
+      const msg = await test.run();
+      setResults(prev => ({ ...prev, [test.id]: { status: msg?.startsWith('SKIP') ? 'skip' : 'ok', msg: msg||'OK', ms: Date.now()-t0 } }));
+    } catch(e) {
+      setResults(prev => ({ ...prev, [test.id]: { status:'fail', msg: e.message, ms: Date.now()-t0 } }));
+    }
+  };
+
+  const runAll = async () => {
+    setRunning(true); setResults({});
+    for (const t of TESTS) await runTest(t);
+    setRunning(false);
+  };
+
+  const groups = [...new Set(TESTS.map(t => t.group))];
+  const done = Object.keys(results).length;
+  const passed = Object.values(results).filter(r => r.status==='ok'||r.status==='skip').length;
+  const failed = Object.values(results).filter(r => r.status==='fail').length;
+
+  return (
+    <div style={{height:'100%', display:'flex', flexDirection:'column', background:'var(--bg-1)', maxWidth:480, margin:'0 auto'}}>
+      <div style={{padding:'16px 16px 12px', borderBottom:'0.5px solid var(--border)', background:'var(--bg-card)', display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0}}>
+        <div>
+          <p style={{fontSize:16, fontWeight:700, color:'var(--text-1)', marginBottom:2}}>🧪 Smoke Test</p>
+          <p style={{fontSize:12, color:'var(--text-3)', fontFamily:'monospace'}}>{TESTS.length} checks · pre-deploy</p>
+        </div>
+        <button onClick={onClose} style={{background:'none', border:'none', cursor:'pointer', color:'var(--text-3)', padding:4}}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+
+      {done > 0 && (
+        <div style={{padding:'10px 16px', background: failed > 0 ? 'rgba(248,113,113,0.08)' : 'rgba(74,222,128,0.08)', borderBottom:'0.5px solid var(--border)', display:'flex', gap:16, flexShrink:0}}>
+          <span style={{fontSize:13, color:'var(--green)', fontWeight:600}}>✓ {passed} OK</span>
+          {failed > 0 && <span style={{fontSize:13, color:'var(--red)', fontWeight:600}}>✗ {failed} FAIL</span>}
+          <span style={{fontSize:13, color:'var(--text-3)'}}>{done}/{TESTS.length} completados</span>
+        </div>
+      )}
+
+      <div style={{flex:1, overflowY:'auto', padding:'12px 16px'}}>
+        {groups.map(group => (
+          <div key={group} style={{marginBottom:16}}>
+            <p style={{fontSize:11, fontWeight:700, letterSpacing:'0.08em', color:'var(--text-3)', textTransform:'uppercase', marginBottom:8}}>{group}</p>
+            <div style={{background:'var(--bg-card)', border:'0.5px solid var(--border)', borderRadius:12, overflow:'hidden'}}>
+              {TESTS.filter(t => t.group === group).map((test, i, arr) => {
+                const r = results[test.id];
+                const isLast = i === arr.length - 1;
+                const col = !r ? 'var(--text-3)' : r.status==='ok' ? 'var(--green)' : r.status==='skip' ? 'var(--amber)' : r.status==='fail' ? 'var(--red)' : 'var(--text-3)';
+                const icon = !r ? '○' : r.status==='ok' ? '✓' : r.status==='skip' ? '⚡' : r.status==='fail' ? '✗' : '⏳';
+                return (
+                  <div key={test.id} style={{padding:'10px 14px', borderBottom: isLast ? 'none' : '0.5px solid var(--sep)'}}>
+                    <div style={{display:'flex', alignItems:'center', gap:10, marginBottom: r?.msg ? 4 : 0}}>
+                      <span style={{fontSize:14, fontWeight:700, color:col, width:16, textAlign:'center', flexShrink:0}}>{icon}</span>
+                      <span style={{fontSize:13, color:'var(--text-1)', flex:1}}>{test.label}</span>
+                      {r?.ms !== undefined && <span style={{fontSize:11, color:'var(--text-3)', fontFamily:'monospace'}}>{r.ms}ms</span>}
+                      <button onClick={() => runTest(test)} disabled={running}
+                        style={{padding:'3px 8px', borderRadius:6, border:'0.5px solid var(--border)', background:'var(--bg-card-h)', color:'var(--text-2)', fontSize:11, cursor:'pointer', flexShrink:0}}>▶</button>
+                    </div>
+                    {r?.msg && <p style={{fontSize:11, color:col, fontFamily:'monospace', marginLeft:26, lineHeight:1.4}}>{r.msg}</p>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{padding:'12px 16px 28px', borderTop:'0.5px solid var(--border)', background:'var(--bg-card)', flexShrink:0}}>
+        <button onClick={runAll} disabled={running}
+          style={{width:'100%', padding:'13px 0', borderRadius:12, border:'none',
+            background: running ? 'var(--border)' : 'var(--text-1)',
+            color: running ? 'var(--text-3)' : 'var(--bg-1)',
+            fontSize:15, fontWeight:700, cursor: running ? 'default' : 'pointer'}}>
+          {running ? 'Ejecutando...' : 'Ejecutar todos los tests'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function LoginScreen({ onLogin, onSmokeTest }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showPass, setShowPass] = useState(false);
+  const tapCount = React.useRef(0);
+  const tapTimer = React.useRef(null);
+
+  const handleLogoTap = () => {
+    tapCount.current += 1;
+    clearTimeout(tapTimer.current);
+    if (tapCount.current >= 7) {
+      tapCount.current = 0;
+      onSmokeTest();
+      return;
+    }
+    tapTimer.current = setTimeout(() => { tapCount.current = 0; }, 2000);
+  };
 
   const locked = fsAuth.isLocked();
   const attempts = fsAuth.getAttempts();
@@ -6311,7 +6514,7 @@ function LoginScreen({ onLogin }) {
       alignItems:'center', justifyContent:'center',
       background:'var(--bg-1)', padding:32, maxWidth:480, margin:'0 auto'
     }}>
-      <div style={{width:76, height:76, borderRadius:22, background:'var(--bg-card)', border:'0.5px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'center', marginBottom:16}}>
+      <div onClick={handleLogoTap} style={{width:76, height:76, borderRadius:22, background:'var(--bg-card)', border:'0.5px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'center', marginBottom:16, cursor:'default', userSelect:'none'}}>
         <svg width="44" height="44" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
           <path d="M50 18 C50 18 30 36 30 52 C30 63.6 39.0 73 50 73 C61.0 73 70 63.6 70 52 C70 36 50 18 50 18Z" fill="none" stroke="#3B8DD4" strokeWidth="3.5"/>
           <path d="M50 38 C50 38 40 35 37 29 C42 24 50 28 50 38Z" fill="#4ADE80"/>
@@ -6475,6 +6678,7 @@ async function checkLotAlerts(lots) {
 
 function App() {
   const [session, setSession] = useState(() => fsAuth.load());
+  const [showSmoke, setShowSmoke] = useState(false);
   // Leer ?lot=ID de la URL al abrir desde QR
   const urlLotId = (() => {
     try {
@@ -6680,7 +6884,9 @@ function App() {
         sessionStorage.removeItem('pendingLotId');
       }
     } catch {}
-  }} />;
+  }} onSmokeTest={() => setShowSmoke(true)} />;
+
+  if (showSmoke) return <SmokeTestScreen onClose={() => setShowSmoke(false)} lots={lots} session={session} />;
 
   if (loading) {
     return (
