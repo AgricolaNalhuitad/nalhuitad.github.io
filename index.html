@@ -5278,6 +5278,48 @@ Responder SIEMPRE en JSON exacto:
 
 Si imagen insuficiente: {"diagnosticoPrincipal":null,"solicitudImagen":{"motivo":"...","instrucciones":"..."}}`;
 
+// ── Clínica IA — Rate limiting ───────────────────────────────
+const CLINICA_DAILY_LIMIT = 10;
+const CLINICA_USAGE_KEY   = 'hidro_clinica_usage_v1';
+
+function useClinicaUsage() {
+  const getLocal = () => {
+    try { return JSON.parse(localStorage.getItem(CLINICA_USAGE_KEY) || 'null'); } catch { return null; }
+  };
+  const [usage, setUsage] = React.useState(() => {
+    const u = getLocal();
+    if (u?.date === todayISO()) return u;
+    return { date: todayISO(), count: 0 };
+  });
+
+  const remaining = Math.max(0, CLINICA_DAILY_LIMIT - (usage.count || 0));
+  const exhausted  = remaining === 0;
+
+  const increment = async () => {
+    const next = { date: todayISO(), count: (usage.count || 0) + 1 };
+    setUsage(next);
+    try { localStorage.setItem(CLINICA_USAGE_KEY, JSON.stringify(next)); } catch {}
+    try {
+      const deviceId = localStorage.getItem('hidro_device_id') || 'unknown';
+      await fsDb.set('config', 'clinica_usage_' + deviceId, {
+        date: next.date, count: next.count, deviceId,
+        updatedAt: new Date().toISOString(),
+      });
+    } catch {}
+  };
+
+  const resetIfNewDay = () => {
+    const u = getLocal();
+    if (!u || u.date !== todayISO()) {
+      const fresh = { date: todayISO(), count: 0 };
+      setUsage(fresh);
+      try { localStorage.setItem(CLINICA_USAGE_KEY, JSON.stringify(fresh)); } catch {}
+    }
+  };
+
+  return { usage, remaining, exhausted, increment, resetIfNewDay };
+}
+
 function NotaClinicaButton({ resultado, lotId, lotName }) {
   const [estado, setEstado] = React.useState('idle'); // idle | guardando | guardado | tratado
 
@@ -5355,10 +5397,13 @@ function NotaClinicaButton({ resultado, lotId, lotName }) {
 function ClinicaScreen({ lots, onNav, preselectedLotId }) {
   const [fase, setFase] = React.useState('inicio');
   const [lotSelId, setLotSelId] = React.useState(preselectedLotId || '');
-  const [imgs, setImgs] = React.useState([]); // [{base64, preview, mediaType}] máx 3
+  const [imgs, setImgs] = React.useState([]);
   const [resultado, setResultado] = React.useState(null);
   const [confirmaciones, setConfirmaciones] = React.useState({});
   const [error, setError] = React.useState('');
+  const { remaining, exhausted, increment, resetIfNewDay } = useClinicaUsage();
+
+  React.useEffect(() => { resetIfNewDay(); }, []);
 
   const activeLots = lots.filter(l => l.stage !== 'cosecha');
   const lotSel = activeLots.find(l => l.id === lotSelId);
@@ -5389,6 +5434,10 @@ function ClinicaScreen({ lots, onNav, preselectedLotId }) {
     const apiKey = loadConfig().clinicaApiKey || '';
     if (!apiKey) {
       setError('Configurá tu API Key de Anthropic en Config → Clínica IA para usar esta función.');
+      return;
+    }
+    if (exhausted) {
+      setError('Límite diario alcanzado (' + CLINICA_DAILY_LIMIT + ' análisis/día). Se resetea a medianoche.');
       return;
     }
     setFase('analizando');
@@ -5423,6 +5472,7 @@ function ClinicaScreen({ lots, onNav, preselectedLotId }) {
       const data = await res.json();
       const txt = (data.content?.[0]?.text || '').replace(/```json|```/g,'').trim();
       const parsed = JSON.parse(txt);
+      await increment();
       setResultado(parsed);
       setFase(parsed.diagnosticoPrincipal ? 'resultado' : 'inicio');
       if (parsed.solicitudImagen) { setError(parsed.solicitudImagen.instrucciones); setFase('inicio'); }
@@ -5543,9 +5593,25 @@ function ClinicaScreen({ lots, onNav, preselectedLotId }) {
           )}
 
           {fase === 'preAnalisis' && imgs.length > 0 && (
-            <button onClick={analizar} style={{width:'100%',padding:'13px 0',borderRadius:12,border:'none',background:'var(--stage-r)',color:'#fff',fontSize:15,fontWeight:700,cursor:'pointer',marginBottom:10}}>
-              {'Analizar ' + imgs.length + (imgs.length === 1 ? ' imagen' : ' imágenes')}
-            </button>
+            <div style={{marginBottom:10}}>
+              <button onClick={analizar} disabled={exhausted}
+                style={{width:'100%',padding:'13px 0',borderRadius:12,border:'none',
+                  background: exhausted ? 'var(--border)' : 'var(--stage-r)',
+                  color: exhausted ? 'var(--text-3)' : '#fff',
+                  fontSize:15,fontWeight:700,
+                  cursor: exhausted ? 'default' : 'pointer'}}>
+                {exhausted
+                  ? 'Límite diario alcanzado'
+                  : ('Analizar ' + imgs.length + (imgs.length === 1 ? ' imagen' : ' imágenes'))}
+              </button>
+              <div style={{display:'flex',justifyContent:'flex-end',marginTop:5}}>
+                <span style={{fontSize:11,color: remaining <= 2 ? 'var(--amber)' : 'var(--text-3)'}}>
+                  {exhausted
+                    ? 'Se resetea a medianoche'
+                    : (remaining + ' / ' + CLINICA_DAILY_LIMIT + ' análisis restantes hoy')}
+                </span>
+              </div>
+            </div>
           )}
 
           {/* Patógenos frecuentes */}
@@ -6363,6 +6429,13 @@ function SmokeTestScreen({ onClose, lots, session }) {
       if (!data.ok) throw new Error(JSON.stringify(data));
       return 'OK · @' + data.result.username;
     }},
+    { id:'testalerta_auth', label:'testAlerta — auth requerida', group:'Alertas', run: async () => {
+      const res = await fetch('https://us-central1-nalhuitad-d6758.cloudfunctions.net/testAlerta', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+      });
+      if (res.status !== 401) throw new Error('Esperado 401, recibido ' + res.status + ' — endpoint NO protegido');
+      return 'OK · endpoint protegido (401 sin token)';
+    }},
     { id:'weather_api', label:'API Clima Open-Meteo', group:'Alertas', run: async () => {
       const res = await fetch('https://api.open-meteo.com/v1/forecast?latitude=-42.524511&longitude=-73.801944&current_weather=true&forecast_days=1');
       if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -6474,7 +6547,7 @@ function LoginScreen({ onLogin, onSmokeTest }) {
       onSmokeTest();
       return;
     }
-    tapTimer.current = setTimeout(() => { tapCount.current = 0; }, 2000);
+    tapTimer.current = setTimeout(() => { tapCount.current = 0; }, 3000);
   };
 
   const locked = fsAuth.isLocked();
