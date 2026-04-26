@@ -4722,31 +4722,7 @@ function PWAInstallButton() {
   );
 }
 
-function NotifPermButton() {
-  const [perm, setPerm] = useState(() => {
-    try { return 'Notification' in window ? Notification.permission : 'unsupported'; }
-    catch { return 'unsupported'; }
-  });
-  const handle = async () => {
-    const result = await requestNotifPermission();
-    setPerm(result);
-    if (result === 'granted') registerFCMToken();
-  };
-  if (perm === 'granted') return (
-    <span style={{fontSize:12, fontWeight:600, color:'var(--green)', padding:'5px 12px', borderRadius:8, background:'var(--bg-card-h)'}}>✓ Activas</span>
-  );
-  if (perm === 'denied') return (
-    <span style={{fontSize:11, color:'var(--text-3)'}}>Bloqueadas en el navegador</span>
-  );
-  if (perm === 'unsupported') return (
-    <span style={{fontSize:11, color:'var(--text-3)'}}>No soportado</span>
-  );
-  return (
-    <button onClick={handle} style={{padding:'7px 14px', borderRadius:8, border:'0.5px solid var(--green)', background:'none', color:'var(--green)', fontSize:13, fontWeight:600, cursor:'pointer'}}>
-      Activar
-    </button>
-  );
-}
+
 
 function ConfigScreen({ session, onLogout, darkMode, onDarkMode }) {
   const [cfg, setCfg] = useState(() => loadConfig());
@@ -4860,27 +4836,18 @@ function ConfigScreen({ session, onLogout, darkMode, onDarkMode }) {
       {/* Notificaciones */}
       <p style={{fontSize:12, fontWeight:600, letterSpacing:'0.06em', color:'var(--text-2)', textTransform:'uppercase', marginBottom:12}}>Notificaciones</p>
       <div style={{background:'var(--bg-card)', border:'0.5px solid var(--border)', borderRadius:14, overflow:'hidden', marginBottom:20}}>
-        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'14px 16px', borderBottom:'0.5px solid var(--sep)'}}>
-          <div>
-            <p style={{fontSize:14, fontWeight:500, color:'var(--text-1)', marginBottom:2}}>Alertas de lotes</p>
-            <p style={{fontSize:12, color:'var(--text-2)'}}>Notificación cuando un lote se atrasa</p>
+        <div style={{padding:'14px 16px', borderBottom:'0.5px solid var(--sep)'}}>
+          <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+            <div>
+              <p style={{fontSize:14, fontWeight:500, color:'var(--text-1)', marginBottom:2}}>Telegram</p>
+              <p style={{fontSize:12, color:'var(--text-2)'}}>Alertas con sonido al celular</p>
+            </div>
+            <span style={{fontSize:12, fontWeight:600, color:'var(--green)', padding:'5px 12px', borderRadius:8, background:'var(--bg-card-h)'}}>✓ Activo</span>
           </div>
-          <NotifPermButton />
         </div>
-        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'14px 16px'}}>
-          <div>
-            <p style={{fontSize:14, fontWeight:500, color:'var(--text-1)', marginBottom:2}}>Probar notificación</p>
-            <p style={{fontSize:12, color:'var(--text-2)'}}>Envía una notificación de prueba</p>
-          </div>
-          <button onClick={async () => {
-            const perm = await requestNotifPermission();
-            if (perm === 'granted') {
-              await writeNotification({ title:'Nalhuitad · Prueba', body:'Las notificaciones están funcionando correctamente.', nivel:'info', tipo:'prueba' });
-              triggerSWCheck();
-            }
-          }} style={{padding:'7px 14px', borderRadius:8, border:'0.5px solid var(--border)', background:'var(--bg-card-h)', color:'var(--text-2)', fontSize:13, cursor:'pointer'}}>
-            Probar
-          </button>
+        <div style={{padding:'14px 16px'}}>
+          <p style={{fontSize:13, color:'var(--text-2)', marginBottom:6}}>Bot: <span style={{fontFamily:'monospace', color:'var(--text-1)'}}>@nalhuitad_alertas_bot</span></p>
+          <p style={{fontSize:12, color:'var(--text-3)'}}>Heladas · Lotes atrasados · Sensores fuera de rango</p>
         </div>
       </div>
 
@@ -6389,71 +6356,7 @@ function LoginScreen({ onLogin }) {
 // ── SISTEMA DE NOTIFICACIONES ─────────────────────────
 const NOTIF_CHECK_INTERVAL = 2 * 60 * 1000; // 2 minutos
 
-// VAPID key pública del proyecto Firebase nalhuitad-d6758
-// Obtenerla en: Consola Firebase → Configuración → Cloud Messaging → Clave pública del servidor web
-const FCM_VAPID_KEY = 'BFL6cfjP54sBUkf85QcJI7-2Y2S9mc2oDFvcboooBbliH_oMvO3bDDX93eRjffNJAv5VREM7HxJXtqmpZgmO7Z0';
 
-async function registerSW() {
-  if (!('serviceWorker' in navigator)) return;
-  try {
-    const reg = await navigator.serviceWorker.register('/nalhuitad.github.io/sw.js', { scope: '/nalhuitad.github.io/' });
-    return reg;
-  } catch(e) { console.warn('[SW] No se pudo registrar:', e); }
-}
-
-async function registerFCMToken() {
-  try {
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
-    if (Notification.permission !== 'granted') return;
-    const reg = await navigator.serviceWorker.ready;
-    // Suscripción Push con VAPID
-    const sub = await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: FCM_VAPID_KEY,
-    });
-    // Guardar token en Firestore tokens/{deviceId}
-    const deviceId = localStorage.getItem('hidro_device_id') || (() => {
-      const id = 'dev_' + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
-      localStorage.setItem('hidro_device_id', id);
-      return id;
-    })();
-    const tokenData = {
-      token: JSON.stringify(sub),
-      deviceId,
-      platform: navigator.userAgent.slice(0,80),
-      lastSeen: new Date().toISOString(),
-    };
-    await fsDb.set('tokens', deviceId, tokenData);
-    console.log('[FCM] Token registrado:', deviceId);
-  } catch(e) { console.warn('[FCM] Error registrando token:', e.message); }
-}
-
-async function requestNotifPermission() {
-  if (!('Notification' in window)) return 'unsupported';
-  if (Notification.permission === 'granted') return 'granted';
-  if (Notification.permission === 'denied') return 'denied';
-  const result = await Notification.requestPermission();
-  return result;
-}
-
-// Guardar token en IndexedDB para que el SW pueda leerlo
-async function saveTokenForSW(idToken) {
-  return new Promise(resolve => {
-    const req = indexedDB.open('nalhuitad_idb', 1);
-    req.onupgradeneeded = e => {
-      const db = e.target.result;
-      if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
-    };
-    req.onsuccess = e => {
-      const db = e.target.result;
-      const tx = db.transaction('kv', 'readwrite');
-      tx.objectStore('kv').put(idToken, 'auth_token');
-      tx.oncomplete = resolve;
-      tx.onerror = resolve;
-    };
-    req.onerror = resolve;
-  });
-}
 
 // Escribir notificación en Firestore
 async function writeNotification({ title, body, nivel, lotId, tipo }) {
@@ -6469,23 +6372,15 @@ async function writeNotification({ title, body, nivel, lotId, tipo }) {
   return notif;
 }
 
-// Disparar check en el SW
-function triggerSWCheck() {
-  if (!('serviceWorker' in navigator)) return;
-  navigator.serviceWorker.ready.then(reg => {
-    reg.active?.postMessage({ type: 'CHECK_NOTIFICATIONS' });
-  });
-}
+
 
 // Detectar alertas en lotes y disparar notificaciones
 async function checkLotAlerts(lots) {
-  if (Notification.permission !== 'granted') return;
   for (const lot of lots) {
     if (lot.stage === 'cosecha') continue;
     const alert = getLotAlert(lot);
     if (!alert) continue;
     if (alert.status === 'overdue' && Math.abs(alert.remaining) === 1) {
-      // Solo notifica en el primer día de atraso (para no spamear)
       const key = 'notified_overdue_' + lot.id;
       if (!localStorage.getItem(key)) {
         await writeNotification({
@@ -6494,7 +6389,6 @@ async function checkLotAlerts(lots) {
           nivel: 'rojo', lotId: lot.id, tipo: 'atraso'
         });
         localStorage.setItem(key, '1');
-        triggerSWCheck();
       }
     }
   }
@@ -6601,19 +6495,10 @@ function App() {
       saveConfig(merged);
       Object.assign(STAGE_DAYS, remote.stageDays);
     });
-    // Registrar Service Worker para notificaciones
-    registerSW().then(() => {
-      if (Notification.permission === 'granted') registerFCMToken();
-    });
     return () => clearInterval(interval);
   }, [fetchLots]);
 
-  // Guardar token en IndexedDB para SW cuando hay sesión activa
-  useEffect(() => {
-    if (!session) return;
-    const s = fsAuth.load();
-    if (s?.idToken) saveTokenForSW(s.idToken);
-  }, [session]);
+
 
   // Verificar alertas de lotes cuando cambian
   useEffect(() => {
