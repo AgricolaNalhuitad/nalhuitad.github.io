@@ -5278,6 +5278,80 @@ Responder SIEMPRE en JSON exacto:
 
 Si imagen insuficiente: {"diagnosticoPrincipal":null,"solicitudImagen":{"motivo":"...","instrucciones":"..."}}`;
 
+function NotaClinicaButton({ resultado, lotId, lotName }) {
+  const [estado, setEstado] = React.useState('idle'); // idle | guardando | guardado | tratado
+
+  const buildNoteText = (conTratamiento) => {
+    const now = new Date();
+    const fecha = now.toLocaleDateString('es-CL', { day:'2-digit', month:'short', year:'numeric' });
+    const hora  = now.toLocaleTimeString('es-CL', { hour:'2-digit', minute:'2-digit' });
+    const dx = resultado.diagnosticoPrincipal;
+    const prot = resultado.protocolo;
+    let txt = '🔬 Clínica IA · ' + fecha + ' ' + hora + '\n';
+    txt += dx.nombre + ' (' + dx.confianza + '% confianza)\n';
+    if (prot?.tratamiento?.producto) {
+      txt += 'Tratamiento: ' + prot.tratamiento.producto;
+      if (prot.tratamiento.dosis_invB) txt += ' · ' + prot.tratamiento.dosis_invB;
+      txt += '\n';
+    }
+    if (conTratamiento) txt += '✅ Tratamiento aplicado';
+    else txt += '⏳ Tratamiento pendiente';
+    return txt;
+  };
+
+  const guardar = async (conTratamiento) => {
+    if (estado !== 'idle') return;
+    setEstado('guardando');
+    const note = {
+      id: genId(),
+      text: buildNoteText(conTratamiento),
+      date: todayISO(),
+      timestamp: new Date().toISOString(),
+      lotId: lotId,
+      lotName: lotName,
+      tipo: 'clinica',
+    };
+    try {
+      const existing = JSON.parse(localStorage.getItem(NOTES_CACHE_KEY) || '[]');
+      localStorage.setItem(NOTES_CACHE_KEY, JSON.stringify([note, ...existing].slice(0, 50)));
+    } catch {}
+    try { await fsDb.set('notas', note.id, note); } catch {}
+    setEstado(conTratamiento ? 'tratado' : 'guardado');
+  };
+
+  if (estado === 'guardado') return (
+    <div style={{marginBottom:10}}>
+      <div style={{padding:'10px 14px',borderRadius:10,background:'rgba(39,111,80,0.1)',border:'0.5px solid var(--green)',marginBottom:8}}>
+        <p style={{fontSize:13,color:'var(--green)',fontWeight:600,marginBottom:2}}>✓ Diagnóstico guardado en lote {lotName}</p>
+        <p style={{fontSize:12,color:'var(--text-3)'}}>Tratamiento pendiente — marcá cuando lo apliques</p>
+      </div>
+      <button onClick={() => guardar(true)} style={{width:'100%',padding:'12px 0',borderRadius:12,border:'0.5px solid var(--green)',background:'none',color:'var(--green)',fontSize:14,fontWeight:600,cursor:'pointer'}}>
+        ✅ Marcar tratamiento como aplicado
+      </button>
+    </div>
+  );
+
+  if (estado === 'tratado') return (
+    <div style={{padding:'10px 14px',borderRadius:10,background:'rgba(39,111,80,0.1)',border:'0.5px solid var(--green)',marginBottom:10}}>
+      <p style={{fontSize:13,color:'var(--green)',fontWeight:600}}>✓ Evento fitosanitario completo guardado en {lotName}</p>
+    </div>
+  );
+
+  if (estado === 'guardando') return (
+    <div style={{padding:'13px 0',borderRadius:12,background:'var(--bg-card-h)',textAlign:'center',marginBottom:10}}>
+      <p style={{fontSize:14,color:'var(--text-3)'}}>Guardando...</p>
+    </div>
+  );
+
+  return (
+    <div style={{marginBottom:10}}>
+      <button onClick={() => guardar(false)} style={{width:'100%',padding:'13px 0',borderRadius:12,border:'none',background:'var(--green)',color:'#fff',fontSize:15,fontWeight:700,cursor:'pointer'}}>
+        Guardar diagnóstico en lote {lotName}
+      </button>
+    </div>
+  );
+}
+
 function ClinicaScreen({ lots, onNav, preselectedLotId }) {
   const [fase, setFase] = React.useState('inicio');
   const [lotSelId, setLotSelId] = React.useState(preselectedLotId || '');
@@ -5667,7 +5741,12 @@ function ClinicaScreen({ lots, onNav, preselectedLotId }) {
             <p style={{fontSize:13,color:'var(--amber)',lineHeight:1.5}}>Verificar que los productos estén registrados SAG Chile para cultivos de consumo fresco antes de aplicar.</p>
           </div>
 
-          <button onClick={resetear} style={{width:'100%',padding:'13px 0',borderRadius:12,border:'none',background:'var(--green)',color:'#fff',fontSize:15,fontWeight:700,cursor:'pointer'}}>
+          {/* Guardar diagnóstico como nota en el lote */}
+          {lotSel && (
+            <NotaClinicaButton resultado={resultado} lotId={lotSel.id} lotName={lotSel.name} />
+          )}
+
+          <button onClick={resetear} style={{width:'100%',padding:'13px 0',borderRadius:12,border:'none',background:'var(--bg-card-h)',color:'var(--text-2)',fontSize:15,fontWeight:600,cursor:'pointer',marginTop:8}}>
             Nuevo análisis
           </button>
         </div>
