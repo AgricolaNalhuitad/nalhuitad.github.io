@@ -4656,14 +4656,13 @@ function loadConfig() {
       plantsPer: 135,
       darkMode: false,
       nombre: '',
-      clinicaApiKey: '',
       stageDays: {
         almacigo:    { verano:28, otono:32, invierno:35, primavera:30 },
         transplante: { verano:15, otono:15, invierno:15, primavera:15 },
         raleo:       { verano:22, otono:35, invierno:50, primavera:28 },
       }
     };
-  } catch { return { plantsPer:135, darkMode:false, nombre:'', clinicaApiKey:'', stageDays:{ almacigo:{verano:28,otono:32,invierno:35,primavera:30}, transplante:{verano:15,otono:15,invierno:15,primavera:15}, raleo:{verano:22,otono:35,invierno:50,primavera:28} } }; }
+  } catch { return { plantsPer:135, darkMode:false, nombre:'', stageDays:{ almacigo:{verano:28,otono:32,invierno:35,primavera:30}, transplante:{verano:15,otono:15,invierno:15,primavera:15}, raleo:{verano:22,otono:35,invierno:50,primavera:28} } }; }
 }
 
 function saveConfig(cfg) {
@@ -4728,8 +4727,6 @@ function ConfigScreen({ session, onLogout, darkMode, onDarkMode }) {
   const [cfg, setCfg] = useState(() => loadConfig());
   const [activeStage, setActiveStage] = useState('almacigo');
   const [saved, setSaved] = useState(false);
-  const [showKey, setShowKey] = useState(false);
-
   const update = (path, val) => {
     setCfg(prev => {
       const next = JSON.parse(JSON.stringify(prev));
@@ -4806,30 +4803,12 @@ function ConfigScreen({ session, onLogout, darkMode, onDarkMode }) {
       {/* Clínica IA */}
       <p style={{fontSize:12, fontWeight:600, letterSpacing:'0.06em', color:'var(--text-2)', textTransform:'uppercase', marginBottom:12}}>Clínica IA</p>
       <div style={{background:'var(--bg-card)', border:'0.5px solid var(--border)', borderRadius:14, overflow:'hidden', marginBottom:20}}>
-        <div style={{padding:'14px 16px'}}>
-          <p style={{fontSize:14, fontWeight:500, color:'var(--text-1)', marginBottom:2}}>API Key Anthropic</p>
-          <p style={{fontSize:12, color:'var(--text-2)', marginBottom:8}}>Requerida para análisis de imágenes · Solo se guarda en este dispositivo</p>
-          <div style={{display:'flex', gap:6}}>
-            <input
-              id="cfg-apikey" name="cfg-apikey"
-              type={showKey ? 'text' : 'password'}
-              placeholder="sk-ant-api03-..."
-              value={cfg.clinicaApiKey || ''}
-              onChange={e => update('clinicaApiKey', e.target.value)}
-              style={{flex:1, padding:'8px 10px', borderRadius:8, border:'0.5px solid var(--border)', background:'var(--bg-card-h)', color:'var(--text-1)', fontSize:13, fontFamily:'monospace', outline:'none'}}
-            />
-            <button onClick={() => setShowKey(!showKey)}
-              style={{padding:'8px 10px', borderRadius:8, border:'0.5px solid var(--border)', background:'var(--bg-card-h)', color:'var(--text-2)', cursor:'pointer', flexShrink:0}}>
-              {showKey
-                ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
-                : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-              }
-            </button>
+        <div style={{padding:'14px 16px', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+          <div>
+            <p style={{fontSize:14, fontWeight:500, color:'var(--text-1)', marginBottom:2}}>Diagnóstico fitopatológico</p>
+            <p style={{fontSize:12, color:'var(--text-2)'}}>Claude Opus 4 · Límite 10 análisis/día</p>
           </div>
-          {cfg.clinicaApiKey
-            ? <p style={{fontSize:12, color:'var(--green)', marginTop:6}}>Clave configurada</p>
-            : <p style={{fontSize:12, color:'var(--amber)', marginTop:6}}>Sin clave — Clínica IA no disponible</p>
-          }
+          <span style={{fontSize:12, fontWeight:600, color:'var(--green)', padding:'5px 12px', borderRadius:8, background:'var(--bg-card-h)'}}>✓ Activo</span>
         </div>
       </div>
 
@@ -5431,11 +5410,6 @@ function ClinicaScreen({ lots, onNav, preselectedLotId }) {
 
   const analizar = async () => {
     if (!imgs.length) return;
-    const apiKey = loadConfig().clinicaApiKey || '';
-    if (!apiKey) {
-      setError('Configurá tu API Key de Anthropic en Config → Clínica IA para usar esta función.');
-      return;
-    }
     if (exhausted) {
       setError('Límite diario alcanzado (' + CLINICA_DAILY_LIMIT + ' análisis/día). Se resetea a medianoche.');
       return;
@@ -5446,32 +5420,32 @@ function ClinicaScreen({ lots, onNav, preselectedLotId }) {
       ? ('Lote ' + lotSel.id + ' (' + (lotSel.variety||'Milena') + ') en Invernadero ' + (lotSel.location?.invernadero||'?') + ' ' + invLabel + '. Etapa: ' + (lotSel.stage||'?') + '.')
       : 'Lote no especificado. Analizar solo por síntomas visuales.';
     try {
-      const imgBlocks = imgs.map(img => ({ type: 'image', source: { type: 'base64', media_type: img.mediaType || 'image/jpeg', data: img.base64 } }));
-      const introText = imgs.length > 1
-        ? ('Se envían ' + imgs.length + ' ángulos de la misma planta afectada. ' + ctx + ' Analiza todas las imágenes en conjunto para dar un diagnóstico más preciso. Responde SOLO en el formato JSON especificado.')
-        : ('Analiza esta imagen. ' + ctx + ' Responde SOLO en el formato JSON especificado.');
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
+      // Obtener Firebase ID token para autenticar con el proxy
+      const s = fsAuth.load();
+      const idToken = await fsDb.getFreshToken();
+      if (!idToken) throw new Error('Sesión expirada — volvé a iniciar sesión.');
+
+      const imgPayload = imgs.map(img => ({ base64: img.base64, mediaType: img.mediaType || 'image/jpeg' }));
+
+      const res = await fetch('https://us-central1-nalhuitad-d6758.cloudfunctions.net/analizarClinica', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true',
+          'Authorization': 'Bearer ' + idToken,
         },
         body: JSON.stringify({
-          model: 'claude-opus-4-6',
-          max_tokens: 1500,
-          system: CLINICA_SYSTEM_PROMPT,
-          messages: [{ role: 'user', content: [...imgBlocks, { type: 'text', text: introText }] }]
+          imgs: imgPayload,
+          ctx: ctx,
+          systemPrompt: CLINICA_SYSTEM_PROMPT,
         })
       });
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({}));
-        throw new Error(errBody?.error?.message || ('Error ' + res.status));
+        throw new Error(errBody?.error || ('Error ' + res.status));
       }
       const data = await res.json();
-      const txt = (data.content?.[0]?.text || '').replace(/```json|```/g,'').trim();
-      const parsed = JSON.parse(txt);
+      if (!data.ok) throw new Error(data.error || 'Error en el análisis');
+      const parsed = data.resultado;
       await increment();
       setResultado(parsed);
       setFase(parsed.diagnosticoPrincipal ? 'resultado' : 'inicio');
@@ -6409,18 +6383,13 @@ function SmokeTestScreen({ onClose, lots, session }) {
       localStorage.setItem(NOTES_CACHE_KEY, JSON.stringify(existing));
       return 'OK · ' + existing.length + ' nota(s) existentes';
     }},
-    { id:'clinica_api', label:'API Clínica (CORS)', group:'Clínica', run: async () => {
-      const apiKey = loadConfig().clinicaApiKey || '';
-      if (!apiKey) return 'SKIP — API key no configurada';
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method:'POST',
-        headers:{ 'Content-Type':'application/json', 'x-api-key':apiKey, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true' },
-        body: JSON.stringify({ model:'claude-opus-4-6', max_tokens:5, messages:[{ role:'user', content:'di ok' }] })
+    { id:'clinica_api', label:'Proxy Clínica (endpoint)', group:'Clínica', run: async () => {
+      // Verifica que el proxy existe y rechaza requests sin auth
+      const res = await fetch('https://us-central1-nalhuitad-d6758.cloudfunctions.net/analizarClinica', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
       });
-      if (res.status === 401) throw new Error('API key inválida (401)');
-      if (res.status === 529) return 'API sobrecargada (529) — key OK';
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      return 'OK · CORS headers correctos';
+      if (res.status !== 401) throw new Error('Esperado 401, recibido ' + res.status + ' — proxy NO protegido');
+      return 'OK · proxy activo y protegido (401 sin token)';
     }},
     { id:'telegram_bot', label:'Bot Telegram', group:'Alertas', run: async () => {
       const res = await fetch('https://api.telegram.org/bot8644204912:AAEHYBZulW85ojhm6B1O-N8OKrXbIH_os8M/getMe');
