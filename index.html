@@ -3,6 +3,33 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<!-- ══ SEGURIDAD ══════════════════════════════════════ -->
+<!-- Previene MIME sniffing -->
+<meta http-equiv="X-Content-Type-Options" content="nosniff">
+<!-- Controla info del referrer enviada a terceros -->
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<!-- CSP: restringe fuentes de scripts, estilos e imágenes -->
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'self' https://agricolanalhuitad.github.io;
+  script-src 'self' 'unsafe-inline' https://unpkg.com https://cdnjs.cloudflare.com https://fonts.googleapis.com;
+  style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com;
+  font-src 'self' https://fonts.gstatic.com;
+  img-src 'self' data: blob: https:;
+  connect-src 'self'
+    https://firestore.googleapis.com
+    https://identitytoolkit.googleapis.com
+    https://securetoken.googleapis.com
+    https://api.anthropic.com
+    https://us-central1-nalhuitad-d6758.cloudfunctions.net
+    https://api.telegram.org
+    https://api.open-meteo.com
+    https://fonts.googleapis.com
+    https://fonts.gstatic.com;
+  frame-src 'none';
+  object-src 'none';
+  base-uri 'self';
+">
+<!-- ════════════════════════════════════════════════════ -->
 <title>App Agrícola Nalhuitad</title>
 <meta name="description" content="Seguimiento de cultivos hidropónicos — Nalhuitad">
 <meta name="theme-color" content="#0F1219">
@@ -5526,7 +5553,21 @@ function ClinicaScreen({ lots, onNav, preselectedLotId }) {
       setFase(parsed.diagnosticoPrincipal ? 'resultado' : 'inicio');
       if (parsed.solicitudImagen) { setError(parsed.solicitudImagen.instrucciones); setFase('inicio'); }
     } catch(e) {
-      setError('Error al analizar: ' + (e.message || 'Verificá tu conexión e intentá de nuevo.'));
+      const msg = e.message || '';
+      let userMsg = 'Error al analizar. Verificá tu conexión e intentá de nuevo.';
+      if (msg.includes('image_too_large') || msg.includes('too large'))
+        userMsg = 'La imagen es muy pesada. Reducí el tamaño e intentá de nuevo.';
+      else if (msg.includes('invalid_api_key') || msg.includes('401'))
+        userMsg = 'API Key inválida. Verificá la configuración en Config → Clínica IA.';
+      else if (msg.includes('overloaded') || msg.includes('529') || msg.includes('529'))
+        userMsg = 'El servicio está ocupado. Intentá en unos minutos.';
+      else if (msg.includes('context_length') || msg.includes('too many'))
+        userMsg = 'Demasiadas imágenes o muy pesadas. Intentá con menos fotos.';
+      else if (msg.includes('Sesión expirada'))
+        userMsg = 'Sesión expirada. Volvé a iniciar sesión.';
+      else if (msg.includes('429') || msg.includes('Límite'))
+        userMsg = msg; // rate limit — mostrar tal cual, es info útil
+      setError(userMsg);
       setFase('preAnalisis');
     }
   };
