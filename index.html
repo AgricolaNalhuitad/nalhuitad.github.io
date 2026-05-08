@@ -385,6 +385,54 @@ const INV_C = {
 };
 const CAPACIDAD_DEFINITIVOS = INV_A.capacidadTotal + INV_B.capacidadTotal; // 3756
 
+// ── PROGRESO DE RALEO ─────────────────────────────────
+// Analiza el array raleos[] del lote padre y calcula:
+// - Cuántas plantas se han raleado y cuántas quedan
+// - Ritmo (plantas/día) basado en el historial real
+// - Fecha proyectada para terminar el raleo
+function getRaleoProgress(lot) {
+  const raleos = lot.raleos || [];
+  if (!raleos.length) return null;
+
+  const total = (lot.currentQuantity || 0) + raleos.reduce(function(a, r) { return a + (r.cantidadRaleada || 0); }, 0);
+  const raleadas = raleos.reduce(function(a, r) { return a + (r.cantidadRaleada || 0); }, 0);
+  const restantes = lot.currentQuantity || 0;
+  const porcentaje = total > 0 ? Math.round((raleadas / total) * 100) : 0;
+
+  // Calcular ritmo real — ordenar raleos por fecha
+  const sorted = raleos
+    .filter(function(r) { return r.fecha; })
+    .slice()
+    .sort(function(a, b) { return new Date(a.fecha) - new Date(b.fecha); });
+
+  var ritmo = null; // plantas/día
+  var proyeccionFin = null;
+
+  if (sorted.length >= 2) {
+    const fechaInicio = new Date(sorted[0].fecha + 'T12:00:00');
+    const fechaUltimo = new Date(sorted[sorted.length - 1].fecha + 'T12:00:00');
+    const diasTranscurridos = Math.max(1, Math.round((fechaUltimo - fechaInicio) / 86400000));
+    ritmo = Math.round(raleadas / diasTranscurridos);
+    if (ritmo > 0 && restantes > 0) {
+      const diasRestantes = Math.ceil(restantes / ritmo);
+      proyeccionFin = new Date(fechaUltimo);
+      proyeccionFin.setDate(proyeccionFin.getDate() + diasRestantes);
+    }
+  } else if (sorted.length === 1 && restantes > 0) {
+    // Solo un raleo — no hay ritmo aún, mostrar fecha del raleo
+    proyeccionFin = null;
+    ritmo = null;
+  }
+
+  return {
+    total, raleadas, restantes, porcentaje,
+    ritmo, proyeccionFin,
+    fechaInicio: sorted.length ? sorted[0].fecha : null,
+    fechaUltimo: sorted.length ? sorted[sorted.length - 1].fecha : null,
+    cantidadRaleos: raleos.length,
+  };
+}
+
 function projectHarvests(lot) {
   const raleoEntry = (lot.stageHistory || []).find(function(h) { return h.stage === 'raleo'; });
   if (!raleoEntry) return [];
@@ -1811,6 +1859,33 @@ const LotCard = React.memo(function LotCard({ lot, onSelect, muted }) {
           <Stat label="Plantas al sembrar" value={toPlants(lot.quantity).toLocaleString()} />
           <Stat label="En producción" value={(lot.currentQuantity ?? toPlants(lot.quantity)).toLocaleString()} />
         </div>
+        {(() => {
+          const rp = getRaleoProgress(lot);
+          if (!rp || rp.cantidadRaleos === 0) return null;
+          return (
+            <div style={{marginTop:10, paddingTop:10, borderTop:'0.5px solid var(--sep)'}}>
+              <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:5}}>
+                <span style={{fontSize:11, color:'var(--text-3)', letterSpacing:'0.02em'}}>PROGRESO RALEO</span>
+                <span style={{fontSize:11, fontWeight:700, fontFamily:'DM Mono, monospace', color:'var(--stage-r)'}}>
+                  {rp.raleadas.toLocaleString()} / {rp.total.toLocaleString()} plantas · {rp.porcentaje}%
+                </span>
+              </div>
+              <div style={{height:5, background:'var(--bg-card-h)', borderRadius:4, overflow:'hidden', marginBottom:5}}>
+                <div style={{height:'100%', width:rp.porcentaje + '%', background:'var(--stage-r)', borderRadius:4, transition:'width 0.4s'}} />
+              </div>
+              <div style={{display:'flex', justifyContent:'space-between'}}>
+                <span style={{fontSize:11, color:'var(--text-3)'}}>
+                  {rp.ritmo ? (rp.ritmo.toLocaleString() + ' plantas/día') : (rp.cantidadRaleos + ' raleo' + (rp.cantidadRaleos > 1 ? 's' : '') + ' registrado' + (rp.cantidadRaleos > 1 ? 's' : ''))}
+                </span>
+                <span style={{fontSize:11, color: rp.proyeccionFin ? 'var(--text-3)' : 'var(--text-3)'}}>
+                  {rp.proyeccionFin
+                    ? ('Fin est. ' + rp.proyeccionFin.toLocaleDateString('es-CL', {day:'numeric', month:'short'}))
+                    : (rp.restantes > 0 ? rp.restantes.toLocaleString() + ' restantes' : '✓ Completo')}
+                </span>
+              </div>
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
