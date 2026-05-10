@@ -168,12 +168,6 @@ function fromFSDoc(doc) {
 const AUTH_EXPIRED_ERROR = 'AUTH_EXPIRED';
 
 const fsDb = {
-  getToken() {
-    try {
-      const s = JSON.parse(localStorage.getItem('hidro_auth_v1') || 'null');
-      return s?.idToken || null;
-    } catch { return null; }
-  },
   // Retorna token vigente, refrescando si está por vencer
   async getFreshToken() {
     try {
@@ -259,7 +253,8 @@ const fsAuth = {
       const r = await fetch(REFRESH_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `grant_type=refresh_token&refresh_token=${s.refreshToken}`
+        body: `grant_type=refresh_token&refresh_token=${s.refreshToken}`,
+        signal: AbortSignal.timeout(8000),
       });
       const j = await r.json();
       if (!r.ok) return null;
@@ -315,20 +310,6 @@ const { useState, useEffect, useCallback, useContext, createContext, useMemo } =
 const DarkContext = createContext(false);
 const useDarkMode = () => useContext(DarkContext);
 
-// Helper para leer dark mode en cualquier componente
-const useDark = () => document.body.classList.contains('dark');
-const DM = {
-  bg:      () => 'var(--bg-1)',
-  card:    () => 'var(--bg-card)',
-  card2:   () => 'var(--bg-card-h)',
-  border:  () => 'var(--border)',
-  border2: () => 'var(--border)',
-  text:    () => 'var(--text-1)',
-  text2:   () => 'var(--text-2)',
-  text3:   () => 'var(--text-3)',
-  input:   () => 'var(--bg-input)',
-};
-
 const STAGES = {
   almacigo:    { label: 'Almácigo',   color: 'var(--stage-a)', bg: 'var(--bg-card-h)', order: 0 },
   transplante: { label: 'Transplante', color: 'var(--stage-t)', bg: 'var(--bg-card-h)', order: 1 },
@@ -358,10 +339,6 @@ const COLORS_LIGHT = {
   green:'#157A40', red:'#C0392B', amber:'#C47A1A',
   navBg:'#131720', navActive:'#4ADE80', navInactive:'#6B7FA3',
 };
-function getColors() {
-  return document.body.classList.contains('dark') ? COLORS : COLORS_LIGHT;
-}
-// Context-aware version for use inside React components:
 function useColors() {
   const dm = useDarkMode();
   return dm ? COLORS : COLORS_LIGHT;
@@ -518,7 +495,9 @@ const PLANTS_PER_TRAY = PLANTS_PER_TRAY_DEFAULT;
 const toPlants = (trays) => (trays ?? 0) * getPlantsPer();
 
 function daysSince(dateStr) {
+  if (!dateStr) return 0;
   const [y, m, d] = dateStr.split('-').map(Number);
+  if (!y) return 0;
   const date = new Date(y, m - 1, d);
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -690,9 +669,6 @@ function WeatherIcon({ code, size }) {
     dangerouslySetInnerHTML: { __html: WI[key] }
   });
 }
-// Keep legacy map for any remaining references
-const WEATHER_ICONS = WCODE_TO_WI;
-
 const DIAS_SEMANA_CORTO = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
 
 function useWeather() {
@@ -1282,7 +1258,7 @@ function WeatherCard() {
   const alert = getWeatherAlert(weather);
   const hora = new Date().getHours();
   const scene = getScene(c.weathercode, hora);
-  const nowIso = new Date().toISOString().slice(0,13);
+  const nowIso = useMemo(() => new Date().toISOString().slice(0,13), []);
   const hourlyStart = h ? h.time.findIndex(t => t >= nowIso) : -1;
   const nextHours = hourlyStart >= 0 ? h.time.slice(hourlyStart, hourlyStart + 7) : [];
 
@@ -1436,7 +1412,6 @@ function LotesScreen({ lots, onSelect, goToNuevo, isFromCache, syncing }) {
     catch { return CAPACIDAD_DEFINITIVOS; }
   });
   const [capInput, setCapInput] = useState(String(capacidad));
-  const [showQuickNote, setShowQuickNote] = useState(false);
   const [sortBy, setSortBy] = useState(() => {
     try { return localStorage.getItem('hidro_sort') || 'date_asc'; }
     catch { return 'date_asc'; }
@@ -1513,12 +1488,12 @@ function LotesScreen({ lots, onSelect, goToNuevo, isFromCache, syncing }) {
   const countByStage = (stage) =>
     lots.filter(l => l.stage === stage).reduce((acc, l) => acc + (l.currentQuantity ?? toPlants(l.quantity)), 0);
 
-  const stageCounters = [
+  const stageCounters = useMemo(() => [
     { key:'almacigo',    label:'Almácigo' },
     { key:'transplante', label:'Transplante' },
     { key:'raleo',       label:'Raleo' },
     { key:'cosecha',     label:'Cosecha' },
-  ].filter(s => countByStage(s.key) > 0);
+  ].filter(s => countByStage(s.key) > 0), [lots]);
 
   return (
     <>
@@ -3085,17 +3060,20 @@ function ChildNameEditor({ childLot, cid, cidx, onRename }) {
 }
 
 function DetalleLote({ lot, lots, onBack, backLabel = 'Volver', onUpdate, onDelete, onSaveChild }) {
+  const lotsById = useMemo(() => new Map(lots.map(l => [l.id, l])), [lots]);
   const [editing, setEditing] = useState(false);
   const [showAvanzar, setShowAvanzar] = useState(false);
   const [showCosecha, setShowCosecha] = useState(false);
   const [showTransplante, setShowTransplante] = useState(false);
   const [showRaleoParcial, setShowRaleoParcial] = useState(false);
   const [showZebra, setShowZebra] = useState(false);
-  // Normalize locations — supports both old single location and new array
+  // Normalize locations — adds cantidad and 'P01' default for DetalleLote editing context
   const getLotLocs = (l) => {
-    if (l.locations && l.locations.length > 0) return l.locations;
-    if (l.location?.invernadero) return [{ invernadero: l.location.invernadero, tipo: l.location.tipo||'piscina', identificador: l.location.identificador||'P01', cantidad: l.currentQuantity ?? toPlants(l.quantity) }];
-    return [];
+    const base = normalizeLotLocations(l);
+    if (base.length > 0 && !l.locations?.length) {
+      return [{ ...base[0], identificador: base[0].identificador || 'P01', cantidad: l.currentQuantity ?? toPlants(l.quantity) }];
+    }
+    return base;
   };
   const [locs, setLocs] = useState(() => getLotLocs(lot));
   const [addingLoc, setAddingLoc] = useState(false);
@@ -3739,7 +3717,7 @@ function DetalleLote({ lot, lots, onBack, backLabel = 'Volver', onUpdate, onDele
         <div style={{background:'var(--bg-card)', border:'0.5px solid var(--border)', borderRadius:12, padding:'12px 14px', marginBottom:12}}>
           <p style={{fontSize:11, fontWeight:600, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:'.05em', marginBottom:8}}>Lotes hijos · {lot.childrenIds.length}</p>
           {lot.childrenIds.map((cid, cidx) => {
-            const childLot = lots.find(l => l.id === cid);
+            const childLot = lotsById.get(cid);
             const raleo = (lot.raleos || []).find(r => r.lotHijoId === cid);
             return (
               <div key={cid} style={{padding:'8px 0', borderTop:'0.5px solid var(--sep)'}}>
@@ -3882,6 +3860,17 @@ function DetalleLote({ lot, lots, onBack, backLabel = 'Volver', onUpdate, onDele
   );
 }
 
+// ── Normaliza ubicaciones: soporta legacy {location} y nuevo {locations:[]}
+function normalizeLotLocations(lot) {
+  if (lot.locations?.length > 0) return lot.locations;
+  if (lot.location?.invernadero) return [{
+    invernadero:   lot.location.invernadero,
+    tipo:          lot.location.tipo || 'piscina',
+    identificador: lot.location.identificador || '',
+  }];
+  return [];
+}
+
 function Row({ label, value }) {
   return (
     <div style={{display:'flex', justifyContent:'space-between', alignItems:'baseline', padding:'8px 0', borderBottom:'0.5px solid var(--sep)'}}>
@@ -3893,18 +3882,21 @@ function Row({ label, value }) {
 
 // ── ALERTAS SCREEN ────────────────────────────────────
 function AlertasScreen({ lots, onSelect }) {
-  const active = lots.filter(l => l.stage !== 'cosecha');
-  const withAlerts = active
+  const active = useMemo(() => lots.filter(l => l.stage !== 'cosecha'), [lots]);
+  const withAlerts = useMemo(() => active
     .map(l => ({ lot: l, alert: getLotAlert(l) }))
     .filter(({ alert }) => alert && alert.status !== 'ok')
-    .sort((a, b) => a.alert.remaining - b.alert.remaining);
-
-  const okLots = active
+    .sort((a, b) => a.alert.remaining - b.alert.remaining), [active]);
+  const okLots = useMemo(() => active
     .map(l => ({ lot: l, alert: getLotAlert(l) }))
     .filter(({ alert }) => alert && alert.status === 'ok')
-    .sort((a, b) => a.alert.remaining - b.alert.remaining);
+    .sort((a, b) => a.alert.remaining - b.alert.remaining), [active]);
 
-  const handleSelect = useCallback((lot) => onSelect(lot), [onSelect]);
+  const [showZebra, setShowZebra] = useState(false);
+  const [zebraLot, setZebraLot]   = useState(null);
+
+  const handleSelect   = useCallback((lot) => onSelect(lot), [onSelect]);
+  const handlePrint    = useCallback((lot) => { setZebraLot(lot); setShowZebra(true); }, []);
 
   if (active.length === 0) {
     return (
@@ -3934,7 +3926,8 @@ function AlertasScreen({ lots, onSelect }) {
           </div>
         </div>
         <p className="dm-section-label" style={{fontSize:12, fontWeight:600, letterSpacing:'0.06em', color:'var(--text-2)', textTransform:'uppercase', marginBottom:12}}>Próximos vencimientos</p>
-        {okLots.map(({ lot, alert }) => <AlertCard key={lot.id} lot={lot} alert={alert} onSelect={handleSelect} />)}
+        {okLots.map(({ lot, alert }) => <AlertCard key={lot.id} lot={lot} alert={alert} onSelect={handleSelect} onPrintClick={handlePrint} />)}
+        {showZebra && zebraLot && <ZebraModal lot={zebraLot} onClose={() => setShowZebra(false)} />}
       </div>
     );
   }
@@ -3946,7 +3939,7 @@ function AlertasScreen({ lots, onSelect }) {
           <p style={{fontSize:12, fontWeight:600, letterSpacing:'0.06em', color:'var(--red)', textTransform:'uppercase', marginBottom:12}}>
             Requieren atención · {withAlerts.length}
           </p>
-          {withAlerts.map(({ lot, alert }) => <AlertCard key={lot.id} lot={lot} alert={alert} onSelect={handleSelect} />)}
+          {withAlerts.map(({ lot, alert }) => <AlertCard key={lot.id} lot={lot} alert={alert} onSelect={handleSelect} onPrintClick={handlePrint} />)}
         </>
       )}
       {okLots.length > 0 && (
@@ -3954,14 +3947,15 @@ function AlertasScreen({ lots, onSelect }) {
           <p className="dm-section-label" style={{fontSize:12, fontWeight:600, letterSpacing:'0.06em', color:'var(--text-2)', textTransform:'uppercase', margin:'20px 0 12px'}}>
             En plazo · {okLots.length}
           </p>
-          {okLots.map(({ lot, alert }) => <AlertCard key={lot.id} lot={lot} alert={alert} onSelect={handleSelect} />)}
+          {okLots.map(({ lot, alert }) => <AlertCard key={lot.id} lot={lot} alert={alert} onSelect={handleSelect} onPrintClick={handlePrint} />)}
         </>
       )}
+      {showZebra && zebraLot && <ZebraModal lot={zebraLot} onClose={() => setShowZebra(false)} />}
     </div>
   );
 }
 
-const AlertCard = React.memo(function AlertCard({ lot, alert, onSelect }) {
+const AlertCard = React.memo(function AlertCard({ lot, alert, onSelect, onPrintClick }) {
   const isOverdue = alert.status === 'overdue';
   const isWarning = alert.status === 'warning';
   const handleClick = React.useCallback(() => onSelect(lot), [lot, onSelect]);
@@ -3978,11 +3972,7 @@ const AlertCard = React.memo(function AlertCard({ lot, alert, onSelect }) {
   const sepColor = isOverdue||isWarning ? accentHex+'22' : 'var(--sep)';
   const textColor = 'var(--text-1)';
   const text2Color = 'var(--text-2)';
-  const locs = lot.locations && lot.locations.length > 0
-    ? lot.locations
-    : lot.location?.invernadero
-      ? [{ invernadero: lot.location.invernadero, tipo: lot.location.tipo||'piscina', identificador: lot.location.identificador||'' }]
-      : [];
+  const locs = normalizeLotLocations(lot);
 
   return (
     <div onClick={handleClick} style={{
@@ -4032,7 +4022,7 @@ const AlertCard = React.memo(function AlertCard({ lot, alert, onSelect }) {
                 : `${alert.remaining}d restantes`}
             </div>
             {/* Botón Zebra — discreto en el header */}
-            <button onClick={() => setShowZebra(true)} style={{
+            <button onClick={e => { e.stopPropagation(); onPrintClick && onPrintClick(lot); }} style={{
               display:'flex', alignItems:'center', gap:4,
               background:'none', border:'0.5px solid var(--border)',
               borderRadius:7, padding:'3px 9px', cursor:'pointer',
@@ -4058,6 +4048,15 @@ const AlertCard = React.memo(function AlertCard({ lot, alert, onSelect }) {
   );
 });
 
+function calcLotMermaRate(lot) {
+  let total = 0, desc = 0;
+  for (const c of (lot.cosechas || [])) {
+    total += (c.cosechadas || 0) + (c.descartadas || 0);
+    desc  += (c.descartadas || 0);
+  }
+  return total > 0 ? Math.round((desc / total) * 100) : 0;
+}
+
 function exportData(lots, format) {
   const fecha = new Date().toLocaleDateString('es-CL').replace(/\//g,'-');
 
@@ -4065,11 +4064,6 @@ function exportData(lots, format) {
   function fLoc(lot) {
     if (!lot.location) return '';
     return (lot.location.invernadero||'') + ' / ' + (lot.location.tipo||'') + ' ' + (lot.location.identificador||'');
-  }
-  function fTasaMerma(lot) {
-    const total = (lot.cosechas||[]).reduce((a,c) => a+(c.cosechadas||0)+(c.descartadas||0), 0);
-    const desc  = (lot.cosechas||[]).reduce((a,c) => a+(c.descartadas||0), 0);
-    return total > 0 ? Math.round((desc/total)*100) : 0;
   }
   function fISL(lot) {
     const qty = lot.quantity || 1;
@@ -4102,7 +4096,7 @@ function exportData(lots, format) {
     'Plantas_Inicial':       toPlants(lot.quantity),
     'Plantas_Actual':        lot.currentQuantity ?? toPlants(lot.quantity),
     'Mortalidad_Acumulada':  lot.mortalidadAcumulada || 0,
-    'Tasa_Merma_Pct':        fTasaMerma(lot),
+    'Tasa_Merma_Pct':        calcLotMermaRate(lot),
     'ISL_Pct':               fISL(lot),
     'Dias_Etapa_Actual':     daysSince(lot.stageHistory?.[lot.stageHistory.length-1]?.date || lot.date),
     'Dias_Ciclo_Total':      daysSince(lot.date),
@@ -4412,15 +4406,23 @@ function HistorialScreen({ lots }) {
   const totalSalida = totalCosechadas + totalDescartadas;
   const tasaMermaGlobal = totalSalida > 0 ? Math.round((totalDescartadas / totalSalida) * 100) : null;
 
-  // ── Duración promedio real por etapa ──
-  const stageDurations = { almacigo: [], transplante: [], raleo: [] };
+  // ── Duración promedio real por etapa + merma por etapa (una sola pasada) ──
+  const stageDurations  = { almacigo: [], transplante: [], raleo: [] };
+  const stageTransitions = { almacigo: [], transplante: [], raleo: [] };
   todos.forEach(lot => {
     lot.stageHistory.forEach((h, i) => {
       if (i === 0) return;
       const prev = lot.stageHistory[i - 1];
+      // duraciones
       const dur = daysSince(prev.date) - daysSince(h.date);
       if (dur > 0 && stageDurations[prev.stage]) {
         stageDurations[prev.stage].push(dur);
+      }
+      // merma
+      if (prev.quantity > 0 && stageTransitions[prev.stage]) {
+        const merma = prev.quantity - h.quantity;
+        const pct = Math.round((merma / prev.quantity) * 100);
+        if (pct >= 0) stageTransitions[prev.stage].push(pct);
       }
     });
     if (lot.stage === 'cosecha' && lot.cosechas?.length > 0) {
@@ -4434,20 +4436,6 @@ function HistorialScreen({ lots }) {
 
   const avg = arr => arr.length > 0 ? Math.round(arr.reduce((a,b) => a+b, 0) / arr.length) : null;
   const STAGE_EST = { almacigo: 30, transplante: 15, raleo: 35 };
-
-  // ── Merma por etapa ──
-  const stageTransitions = { almacigo: [], transplante: [], raleo: [] };
-  todos.forEach(lot => {
-    lot.stageHistory.forEach((h, i) => {
-      if (i === 0) return;
-      const prev = lot.stageHistory[i - 1];
-      if (prev.quantity > 0 && stageTransitions[prev.stage]) {
-        const merma = prev.quantity - h.quantity;
-        const pct = Math.round((merma / prev.quantity) * 100);
-        if (pct >= 0) stageTransitions[prev.stage].push(pct);
-      }
-    });
-  });
 
   // ── Rendimiento por lote — incluye parciales en curso ──
   const lotRendimientos = conCosechas.map(lot => {
@@ -4751,20 +4739,22 @@ const SEASON_KEYS = ['verano','otono','invierno','primavera'];
 const SEASON_NAMES = { verano:'Verano', otono:'Otoño', invierno:'Invierno', primavera:'Primavera' };
 const CONFIG_KEY = 'hidro_config_v1';
 
+const CONFIG_DEFAULTS = {
+  plantsPer: 135,
+  darkMode: false,
+  nombre: '',
+  stageDays: {
+    almacigo:    { verano:28, otono:32, invierno:35, primavera:30 },
+    transplante: { verano:15, otono:15, invierno:15, primavera:15 },
+    raleo:       { verano:22, otono:35, invierno:50, primavera:28 },
+  }
+};
 function loadConfig() {
   try {
     const c = JSON.parse(localStorage.getItem(CONFIG_KEY) || 'null');
-    return c || {
-      plantsPer: 135,
-      darkMode: false,
-      nombre: '',
-      stageDays: {
-        almacigo:    { verano:28, otono:32, invierno:35, primavera:30 },
-        transplante: { verano:15, otono:15, invierno:15, primavera:15 },
-        raleo:       { verano:22, otono:35, invierno:50, primavera:28 },
-      }
-    };
-  } catch { return { plantsPer:135, darkMode:false, nombre:'', stageDays:{ almacigo:{verano:28,otono:32,invierno:35,primavera:30}, transplante:{verano:15,otono:15,invierno:15,primavera:15}, raleo:{verano:22,otono:35,invierno:50,primavera:28} } }; }
+    if (!c) return { ...CONFIG_DEFAULTS, stageDays: { ...CONFIG_DEFAULTS.stageDays } };
+    return { ...CONFIG_DEFAULTS, ...c, stageDays: { ...CONFIG_DEFAULTS.stageDays, ...c.stageDays } };
+  } catch { return { ...CONFIG_DEFAULTS, stageDays: { ...CONFIG_DEFAULTS.stageDays } }; }
 }
 
 function saveConfig(cfg) {
@@ -4798,11 +4788,15 @@ function PWAInstallButton() {
 
   useEffect(() => {
     const handler = (e) => { e.preventDefault(); setPrompt(e); };
+    const installedHandler = () => setInstalled(true);
     window.addEventListener('beforeinstallprompt', handler);
-    window.addEventListener('appinstalled', () => setInstalled(true));
+    window.addEventListener('appinstalled', installedHandler);
     // Check if already installed
     if (window.matchMedia('(display-mode: standalone)').matches) setInstalled(true);
-    return () => window.removeEventListener('beforeinstallprompt', handler);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handler);
+      window.removeEventListener('appinstalled', installedHandler);
+    };
   }, []);
 
   if (installed) return (
@@ -5050,18 +5044,18 @@ function DashboardScreen({ lots, onNavigate }) {
   const rendimiento     = sembTotal > 0 ? Math.round((cosechadasTotal / sembTotal) * 100) : null;
 
   const diasMaxRaleo  = STAGE_DAYS.raleo[season] || 35;
-  const proximasRaleo = raleos.map(function(lot) {
+  const proximasRaleo = useMemo(() => raleos.map(function(lot) {
     const rh  = (lot.stageHistory||[]).find(function(h) { return h.stage==='raleo'; });
     const diasTranscurridos = rh ? Math.max(0, daysSince(rh.date)) : 0;
     const diasRestantes     = Math.max(0, diasMaxRaleo - diasTranscurridos);
     return { lot, diasRestantes };
-  }).sort(function(a,b) { return a.diasRestantes - b.diasRestantes; });
+  }).sort(function(a,b) { return a.diasRestantes - b.diasRestantes; }), [raleos, diasMaxRaleo]);
 
   // ── Proyección Opus ──────────────────────────────────
   const hoy = new Date();
   const nombresMes = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
   const nombreMes  = nombresMes[hoy.getMonth()];
-  const allEvents  = getMonthProjection(lots, hoy.getFullYear(), hoy.getMonth());
+  const allEvents  = useMemo(() => getMonthProjection(lots, hoy.getFullYear(), hoy.getMonth()), [lots]);
   const todasBarras = allEvents.slice(0, 9);
   const maxBarVal   = todasBarras.length > 0 ? Math.max(...todasBarras.map(function(b) { return b.plants; })) : 210;
   const totalMes    = todasBarras.reduce(function(a,b) { return a+b.plants; }, 0);
@@ -5122,7 +5116,7 @@ function DashboardScreen({ lots, onNavigate }) {
             display:'flex', flexDirection:'column', gap:6,
           }}>
             <div style={{
-              background: weatherAlert.nivel === 'rojo' ? 'var(--bg-card-h)' : 'var(--bg-card-h)',
+              background: 'var(--bg-card-h)',
               border: '0.5px solid ' + (weatherAlert.nivel === 'rojo' ? 'var(--red)' : weatherAlert.nivel === 'ambar' ? 'var(--amber)' : 'var(--stage-t)') + '50',
               borderRadius:8, padding:'7px 10px',
               borderLeft: '3px solid ' + (weatherAlert.nivel === 'rojo' ? 'var(--red)' : weatherAlert.nivel === 'ambar' ? 'var(--amber)' : 'var(--stage-t)'),
@@ -5149,7 +5143,7 @@ function DashboardScreen({ lots, onNavigate }) {
           <div style={{borderTop:'0.5px solid var(--sep)', paddingTop:10}}>
             <div style={{background:'var(--bg-card-h)', border:'0.5px solid var(--green)50', borderRadius:8, padding:'7px 10px', borderLeft:'3px solid var(--green)'}}>
               <p style={{fontSize:12, fontWeight:600, color:'var(--green)'}}>
-                {'✓ ' + proximasRaleo[0].lot.name + (proximasRaleo[0].diasRestantes === 0 ? ' lista para cosechar hoy' : ' lista en ' + proximasRaleo[0].diasRestantes + ' día' + (proximasRaleo[0].diasRestantes !== 1 ? 's' : ''))}
+                {'✓ ' + proximasRaleo[0].lot.name + (proximasRaleo[0].diasRestantes === 0 ? ' lista para ralear hoy' : ' lista en ' + proximasRaleo[0].diasRestantes + ' día' + (proximasRaleo[0].diasRestantes !== 1 ? 's' : ''))}
               </p>
             </div>
           </div>
@@ -5572,7 +5566,11 @@ function ClinicaScreen({ lots, onNav, preselectedLotId }) {
   const [error, setError] = React.useState('');
   const { remaining, exhausted, increment, resetIfNewDay } = useClinicaUsage();
 
-  React.useEffect(() => { resetIfNewDay(); }, []);
+  React.useEffect(() => {
+    resetIfNewDay();
+    const check = setInterval(resetIfNewDay, 60000);
+    return () => clearInterval(check);
+  }, []);
 
   const activeLots = lots.filter(l => l.stage !== 'cosecha');
   const lotSel = activeLots.find(l => l.id === lotSelId);
@@ -5666,7 +5664,7 @@ function ClinicaScreen({ lots, onNav, preselectedLotId }) {
         userMsg = 'La imagen es muy pesada. Reducí el tamaño e intentá de nuevo.';
       else if (msg.includes('invalid_api_key') || msg.includes('401'))
         userMsg = 'API Key inválida. Verificá la configuración en Config → Clínica IA.';
-      else if (msg.includes('overloaded') || msg.includes('529') || msg.includes('529'))
+      else if (msg.includes('overloaded') || msg.includes('529') || msg.includes('503'))
         userMsg = 'El servicio está ocupado. Intentá en unos minutos.';
       else if (msg.includes('context_length') || msg.includes('too many'))
         userMsg = 'Demasiadas imágenes o muy pesadas. Intentá con menos fotos.';
@@ -6045,7 +6043,7 @@ function SensoresScreen({ lots }) {
   }
 
   // ── Agrupar lotes con sensor por invernadero ───────────────
-  const invData = ['A', 'B'].map(inv => {
+  const invData = useMemo(() => ['A', 'B'].map(inv => {
     const invLots = lots.filter(l =>
       l.location?.invernadero === inv &&
       l.sensorReadings?.lastUpdate
@@ -6059,7 +6057,7 @@ function SensoresScreen({ lots }) {
     const o2  = sr ? estimateO2(sr.tempAgua) : null;
     const status = nodeStatus(sr?.lastUpdate);
     return { inv, sr, sp, o2, status, lots: invLots };
-  });
+  }), [lots]);
 
   const hasSensores = invData.some(d => d.sr !== null);
 
@@ -6807,8 +6805,8 @@ function LoginScreen({ onLogin, onSmokeTest }) {
             disabled={locked || loading}
             style={{
               width:'100%', padding:'13px 14px', borderRadius:10,
-              border:'0.5px solid ' + (error ? 'var(--red)' : 'var(--border)'),
-              background:'var(--bg-input)',
+              border:'0.5px solid ' + (error || locked ? 'var(--red)' : 'var(--border)'),
+              background: locked ? 'var(--bg-card-h)' : 'var(--bg-input)',
               fontSize:15, color:'var(--text-1)', fontFamily:'-apple-system,BlinkMacSystemFont,\'Segoe UI\',system-ui,sans-serif', outline:'none'
             }}
           />
@@ -6829,7 +6827,7 @@ function LoginScreen({ onLogin, onSmokeTest }) {
               disabled={locked || loading}
               style={{
                 width:'100%', padding:'13px 44px 13px 14px', borderRadius:10,
-                border:'0.5px solid ' + (error ? '#F87171' : 'var(--border)'),
+                border:'0.5px solid ' + (error || locked ? 'var(--red)' : 'var(--border)'),
                 background: locked ? 'var(--bg-card-h)' : 'var(--bg-input)',
                 fontSize:15, color:'var(--text-1)', fontFamily:'-apple-system,BlinkMacSystemFont,\'Segoe UI\',system-ui,sans-serif', outline:'none',
                 WebkitAppearance:'none'
@@ -7001,7 +6999,10 @@ function App() {
     setToast({ msg, type, key: Date.now() });
   }, []);
 
+  const isFetchingRef = React.useRef(false);
   const fetchLots = useCallback(async (silent = false) => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
     if (!silent) setSyncing(true);
     try {
       const data = await fsDb.list('lotes');
@@ -7027,6 +7028,7 @@ function App() {
       if (e.message === AUTH_EXPIRED_ERROR) { setSession(null); return; }
       if (!silent) setError(true);
     } finally {
+      isFetchingRef.current = false;
       setLoading(false);
       setSyncing(false);
     }
@@ -7034,7 +7036,7 @@ function App() {
 
   useEffect(() => {
     fetchLots();
-    const interval = setInterval(() => fetchLots(true), 15000);
+    const interval = setInterval(() => fetchLots(true), 60000);
     // Cargar config operacional compartida desde Firebase
     loadConfigRemote().then(remote => {
       if (!remote) return;
@@ -7087,6 +7089,8 @@ function App() {
     }
   }, [showToast]);
 
+  const handleSelectLot = useCallback(lot => setSelectedLot(lot.id), []);
+
   const handleNav = (id) => {
     setSelectedLot(null);
     setPrevScreen(null);
@@ -7110,7 +7114,7 @@ function App() {
         };
         return <DetalleLote key={lot.id} lot={lot} lots={lots} onBack={handleBack} backLabel={backLabel} onUpdate={updateLot} onDelete={deleteLot} onSaveChild={saveLot} />;
       }
-      return <LotesScreen key="lotes" lots={lots} onSelect={lot => setSelectedLot(lot.id)} goToNuevo={() => handleNav('nuevo')} isFromCache={isFromCache} syncing={syncing} />;
+      return <LotesScreen key="lotes" lots={lots} onSelect={handleSelectLot} goToNuevo={() => handleNav('nuevo')} isFromCache={isFromCache} syncing={syncing} />;
     }
     if (screen === 'nuevo') return <NuevoScreen key="nuevo" onSave={saveLot} goToLotes={() => setScreen('lotes')} />;
     if (screen === 'alertas') return <AlertasScreen key="alertas" lots={lots} onSelect={lot => {
