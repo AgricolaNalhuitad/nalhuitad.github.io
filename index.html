@@ -5468,20 +5468,45 @@ function NotaClinicaButton({ resultado, lotId, lotName }) {
   const [estado, setEstado] = React.useState('idle'); // idle | guardando | guardado | tratado
 
   const buildNoteText = (conTratamiento) => {
-    const now = new Date();
+    const now   = new Date();
     const fecha = now.toLocaleDateString('es-CL', { day:'2-digit', month:'short', year:'numeric' });
     const hora  = now.toLocaleTimeString('es-CL', { hour:'2-digit', minute:'2-digit' });
-    const dx = resultado.diagnosticoPrincipal;
-    const prot = resultado.protocolo;
-    let txt = '🔬 Clínica IA · ' + fecha + ' ' + hora + '\n';
-    txt += dx.nombre + ' (' + dx.confianza + '% confianza)\n';
-    if (prot?.tratamiento?.producto) {
-      txt += 'Tratamiento: ' + prot.tratamiento.producto;
-      if (prot.tratamiento.dosis_invB) txt += ' · ' + prot.tratamiento.dosis_invB;
-      txt += '\n';
+    const dx    = resultado.diagnosticoPrincipal;
+    const prot  = resultado.protocolo;
+    const alt   = resultado.diagnosticoAlternativo;
+
+    // Contexto del lote en el momento del análisis
+    const stageEntry  = (lotName && resultado._lotStage) ? resultado._lotStage : null;
+    const invLabel2   = resultado._invLabel || '';
+
+    let txt = '🔬 Clínica IA · ' + fecha + ' · ' + hora + '\n';
+    txt += '━━━━━━━━━━━━━━━━━━━━━━━━\n';
+    txt += '📋 DIAGNÓSTICO\n';
+    txt += dx.nombre + ' — ' + (dx.agente !== 'N/A' ? dx.agente : 'sin agente patógeno') + '\n';
+    txt += 'Confianza: ' + dx.confianza + '%\n';
+    if (dx.descripcionSintomas) txt += 'Síntomas: ' + dx.descripcionSintomas + '\n';
+    if (alt && alt.confianza > 15) {
+      txt += '↳ Alternativo: ' + alt.nombre + ' (' + alt.confianza + '%) — ' + (alt.diferencial || '') + '\n';
     }
-    if (conTratamiento) txt += '✅ Tratamiento aplicado';
-    else txt += '⏳ Tratamiento pendiente';
+    if (prot?.accionInmediata && prot.accionInmediata !== 'Sin acción requerida — continuar monitoreo rutinario') {
+      txt += '\n⚡ ACCIÓN INMEDIATA\n' + prot.accionInmediata + '\n';
+    }
+    if (prot?.tratamiento?.producto) {
+      txt += '\n💊 TRATAMIENTO\n';
+      txt += prot.tratamiento.producto;
+      if (prot.tratamiento.principioActivo) txt += ' (' + prot.tratamiento.principioActivo + ')';
+      txt += '\n';
+      if (prot.tratamiento.dosis_invA) txt += 'Inv A (DWC 2000L): ' + prot.tratamiento.dosis_invA + '\n';
+      if (prot.tratamiento.dosis_invB) txt += 'Inv B (NFT 2600L): ' + prot.tratamiento.dosis_invB + '\n';
+      if (prot.tratamiento.frecuencia) txt += 'Frecuencia: ' + prot.tratamiento.frecuencia + '\n';
+    }
+    if (prot?.mip && prot.mip.length) {
+      txt += '\n🌿 MIP\n' + prot.mip.map(function(m){return '· ' + m;}).join('\n') + '\n';
+    }
+    if (prot?.fuentes && prot.fuentes.length) {
+      txt += '\nFuentes: ' + prot.fuentes.join(' · ') + '\n';
+    }
+    txt += '\n' + (conTratamiento ? '✅ Tratamiento aplicado' : '⏳ Tratamiento pendiente');
     return txt;
   };
 
