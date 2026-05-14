@@ -1239,6 +1239,7 @@ function WeatherCard() {
   const { weather, wError } = useWeather();
   const dm = useDarkMode();
   const [expandedStat, setExpandedStat] = useState(null);
+  const nowIso = new Date().toISOString().slice(0, 13);
 
   if (wError) return null;
   if (!weather) return (
@@ -1258,7 +1259,6 @@ function WeatherCard() {
   const alert = getWeatherAlert(weather);
   const hora = new Date().getHours();
   const scene = getScene(c.weathercode, hora);
-  const nowIso = useMemo(() => new Date().toISOString().slice(0,13), []);
   const hourlyStart = h ? h.time.findIndex(t => t >= nowIso) : -1;
   const nextHours = hourlyStart >= 0 ? h.time.slice(hourlyStart, hourlyStart + 7) : [];
 
