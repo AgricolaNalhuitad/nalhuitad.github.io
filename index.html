@@ -6920,6 +6920,26 @@ async function writeNotification({ title, body, nivel, lotId, tipo }) {
 
 
 // Detectar alertas en lotes y disparar notificaciones
+class DashboardErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(e) { return { error: e }; }
+  render() {
+    if (this.state.error) {
+      return React.createElement('div', {
+        style: { flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:32, background:'var(--bg-1)' }
+      },
+        React.createElement('p', { style: { fontSize:14, color:'var(--red)', marginBottom:8, fontWeight:600 } }, 'Error en Dashboard'),
+        React.createElement('p', { style: { fontSize:12, color:'var(--text-2)', textAlign:'center', wordBreak:'break-all' } }, String(this.state.error)),
+        React.createElement('button', {
+          onClick: () => this.setState({ error: null }),
+          style: { marginTop:16, padding:'10px 24px', borderRadius:10, background:'var(--green)', color:'#0F1219', fontWeight:700, border:'none', cursor:'pointer', fontSize:14 }
+        }, 'Reintentar')
+      );
+    }
+    return this.props.children;
+  }
+}
+
 async function checkLotAlerts(lots) {
   for (const lot of lots) {
     if (lot.stage === 'cosecha') continue;
@@ -7126,7 +7146,7 @@ function App() {
     if (screen === 'clinica') return <ClinicaScreen key="clinica" lots={lots} onNav={handleNav} preselectedLotId={urlLotId || selectedLot} />;
     if (screen === 'historial') return <HistorialScreen key="historial" lots={lots} />;
     if (screen === 'produccion') return <ProduccionScreen key="produccion" lots={lots} onBack={() => handleNav('dashboard')} />;
-    if (screen === 'dashboard') return <DashboardScreen key="dashboard" lots={lots} onNavigate={handleNav} />;
+    if (screen === 'dashboard') return <DashboardErrorBoundary><DashboardScreen key="dashboard" lots={lots} onNavigate={handleNav} /></DashboardErrorBoundary>;
     if (screen === 'config') return <ConfigScreen key="config" session={session} darkMode={darkMode} onDarkMode={setDarkMode} onLogout={() => { fsAuth.clear(); try { localStorage.removeItem(LOTS_CACHE_KEY); } catch {} setSession(null); }} />;
     if (screen === 'sensores') return <SensoresScreen key="sensores" lots={lots} />;
   };
@@ -7299,10 +7319,10 @@ function App() {
         </div>
       )}
 
-      {!selectedLot && (
+      {!selectedLot && screen !== 'dashboard' && (
         <div style={{
           padding:'max(48px, calc(env(safe-area-inset-top) + 16px)) 20px 16px',
-          background:headerBg, borderBottom:`0.5px solid ${headerBorder}`
+          background:headerBg, borderBottom:'0.5px solid ' + headerBorder
         }}>
           <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start'}}>
             <div>
