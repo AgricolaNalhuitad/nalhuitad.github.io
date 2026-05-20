@@ -493,6 +493,12 @@ const getPlantsPer = () => {
 };
 const PLANTS_PER_TRAY = PLANTS_PER_TRAY_DEFAULT;
 const toPlants = (trays) => (trays ?? 0) * getPlantsPer();
+// Para lotes hijos de raleo parcial, quantity ya está en plantas (no bandejas).
+// Para lotes raíz, quantity está en bandejas → multiplicar por plantsPer.
+const lotPlantasIniciales = (lot) =>
+  (lot && (lot.parentId || lot.isRootLot === false))
+    ? (lot.quantity || 0)
+    : toPlants(lot ? lot.quantity : 0);
 
 function daysSince(dateStr) {
   if (!dateStr) return 0;
@@ -1404,8 +1410,8 @@ function WeatherStat({ icon, label, value }) {
 
 // ── LOTES SCREEN ───────────────────────────────────────
 function LotesScreen({ lots, onSelect, goToNuevo, isFromCache, syncing }) {
-  const active = lots.filter(l => l.stage !== 'cosecha');
-  const cosechados = lots.filter(l => l.stage === 'cosecha');
+  const active = lots.filter(l => l.stage !== 'cosecha' && !l.parentId);
+  const cosechados = lots.filter(l => l.stage === 'cosecha' && !l.parentId);
   const [editingCap, setEditingCap] = useState(false);
   const [capacidad, setCapacidad] = useState(() => {
     try { return parseInt(localStorage.getItem('hidro_capacidad') || String(CAPACIDAD_DEFINITIVOS)); }
@@ -1486,7 +1492,7 @@ function LotesScreen({ lots, onSelect, goToNuevo, isFromCache, syncing }) {
   }
 
   const countByStage = (stage) =>
-    lots.filter(l => l.stage === stage).reduce((acc, l) => acc + (l.currentQuantity ?? toPlants(l.quantity)), 0);
+    lots.filter(l => l.stage === stage && !l.parentId).reduce((acc, l) => acc + (l.currentQuantity ?? lotPlantasIniciales(l)), 0);
 
   const stageCounters = useMemo(() => [
     { key:'almacigo',    label:'Almácigo' },
@@ -1516,7 +1522,7 @@ function LotesScreen({ lots, onSelect, goToNuevo, isFromCache, syncing }) {
         </div>
       )}
       {stageCounters.length > 0 && (() => {
-        const totalActivo = lots.filter(l => l.stage !== 'cosecha').reduce((acc, l) => acc + (l.currentQuantity ?? toPlants(l.quantity)), 0);
+        const totalActivo = lots.filter(l => l.stage !== 'cosecha' && !l.parentId).reduce((acc, l) => acc + (l.currentQuantity ?? lotPlantasIniciales(l)), 0);
         const pctCap = capacidad > 0 ? Math.min(100, Math.round((totalActivo / capacidad) * 100)) : 0;
         const C_IN = 150.8;
         const stagesWithCount = ['almacigo','transplante','raleo'].map(k => ({
@@ -1858,8 +1864,8 @@ const LotCard = React.memo(function LotCard({ lot, onSelect, muted }) {
         </div>
         <div style={{display:'flex', gap:20, marginTop:8, paddingTop:10, borderTop:`0.5px solid ${accentColor ? accentColor : 'var(--sep)'}`}}>
           <Stat label="Ciclo total" value={`${totalCycleDays}d`} />
-          <Stat label="Plantas al sembrar" value={toPlants(lot.quantity).toLocaleString()} />
-          <Stat label="En producción" value={(lot.currentQuantity ?? toPlants(lot.quantity)).toLocaleString()} />
+          <Stat label="Plantas al sembrar" value={lotPlantasIniciales(lot).toLocaleString()} />
+          <Stat label="En producción" value={(lot.currentQuantity ?? lotPlantasIniciales(lot)).toLocaleString()} />
         </div>
         {(() => {
           const rp = getRaleoProgress(lot);
@@ -1905,7 +1911,7 @@ function Stat({ label, value }) {
 function CosechadoCard({ lot, onSelect }) {
   const totalCosechadas = (lot.cosechas || []).reduce((a, c) => a + (c.cosechadas || 0), 0);
   const totalDescartadas = (lot.cosechas || []).reduce((a, c) => a + (c.descartadas || 0), 0);
-  const plantasIniciales = toPlants(lot.quantity);
+  const plantasIniciales = lotPlantasIniciales(lot);
   const rendimiento = plantasIniciales > 0 ? Math.round((totalCosechadas / plantasIniciales) * 100) : 0;
   const fechaInicio = lot.date;
   const fechaFin = lot.cosechas?.length > 0 ? lot.cosechas[lot.cosechas.length-1].date : null;
@@ -3418,9 +3424,9 @@ function DetalleLote({ lot, lots, onBack, backLabel = 'Volver', onUpdate, onDele
 
       <div style={{background: dmCard, border:`0.5px solid ${dmBorder}`, borderRadius:14, padding:'14px 16px', marginTop:16}}>
         <Row label="Variedad" value={lot.variety} />
-        <Row label="Almácigos sembrados" value={''+lot.quantity+' (× '+getPlantsPer()+' plantas)'} />
-        <Row label="Plantas al sembrar" value={toPlants(lot.quantity).toLocaleString()} />
-        <Row label="Plantas en producción" value={(lot.currentQuantity ?? toPlants(lot.quantity)).toLocaleString()} />
+        <Row label="Almácigos sembrados" value={lot.parentId ? ('Lote hijo · ' + (lot.quantity||0).toLocaleString() + ' plantas') : (''+lot.quantity+' (× '+getPlantsPer()+' plantas)')} />
+        <Row label="Plantas al sembrar" value={lotPlantasIniciales(lot).toLocaleString()} />
+        <Row label="Plantas en producción" value={(lot.currentQuantity ?? lotPlantasIniciales(lot)).toLocaleString()} />
         {/* Ubicaciones múltiples — Opción C */}
         <div style={{paddingTop:8, borderTop:'0.5px solid var(--sep)'}}>
           <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: locs.length > 0 ? 8 : 0}}>
@@ -4093,8 +4099,8 @@ function exportData(lots, format) {
     'Identificador_Ubicacion': lot.location?.identificador || '',
     'Densidad_Siembra_pl_m': lot.densidadSiembra || '',
     'Almacigos':             lot.quantity || 0,
-    'Plantas_Inicial':       toPlants(lot.quantity),
-    'Plantas_Actual':        lot.currentQuantity ?? toPlants(lot.quantity),
+    'Plantas_Inicial':       lotPlantasIniciales(lot),
+    'Plantas_Actual':        lot.currentQuantity ?? lotPlantasIniciales(lot),
     'Mortalidad_Acumulada':  lot.mortalidadAcumulada || 0,
     'Tasa_Merma_Pct':        calcLotMermaRate(lot),
     'ISL_Pct':               fISL(lot),
@@ -4401,7 +4407,7 @@ function HistorialScreen({ lots }) {
     a + (l.cosechas || []).reduce((b, c) => b + (c.cosechadas || 0), 0), 0);
   const totalDescartadas = conCosechas.reduce((a, l) =>
     a + (l.cosechas || []).reduce((b, c) => b + (c.descartadas || 0), 0), 0);
-  const totalSembradas = conCosechas.reduce((a, l) => a + toPlants(l.quantity), 0);
+  const totalSembradas = conCosechas.reduce((a, l) => a + lotPlantasIniciales(l), 0);
   const rendimientoGlobal = totalSembradas > 0 ? Math.round((totalCosechadas / totalSembradas) * 100) : 0;
   const totalSalida = totalCosechadas + totalDescartadas;
   const tasaMermaGlobal = totalSalida > 0 ? Math.round((totalDescartadas / totalSalida) * 100) : null;
@@ -4440,7 +4446,7 @@ function HistorialScreen({ lots }) {
   // ── Rendimiento por lote — incluye parciales en curso ──
   const lotRendimientos = conCosechas.map(lot => {
     const cosechadas = (lot.cosechas || []).reduce((a, c) => a + (c.cosechadas || 0), 0);
-    const sembradas = toPlants(lot.quantity);
+    const sembradas = lotPlantasIniciales(lot);
     const ultimaCosecha = (lot.cosechas?.[lot.cosechas.length-1]?.date) || lot.date;
     const duracion = daysSince(lot.date) - daysSince(ultimaCosecha);
     const enCurso = lot.stage !== 'cosecha';
